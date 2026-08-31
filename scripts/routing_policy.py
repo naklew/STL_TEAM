@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """Deterministic mapping from already-classified SLT flags to model routing.
 
-This tool does not decide whether a semantic flag is true. Terra/user evidence performs that
-classification. Once supplied, the mapping to Sol/Luna/Terra is deterministic and testable.
+Semantic classification is still performed by Terra/user evidence. Once the
+classification document is supplied, this tool deterministically maps it to
+named Sol/Luna/Terra agents.
 """
 
 from __future__ import annotations
@@ -13,35 +14,7 @@ from pathlib import Path
 import sys
 from typing import Any
 
-POLICY_VERSION = "0.3.0"
-
-DECISION_FLAGS = (
-    "unresolved_architecture",
-    "ambiguous_requirement",
-    "competing_root_causes",
-    "contract_expansion_required",
-    "unresolved_security_policy",
-    "external_contract_unknown",
-    "migration_strategy_unresolved",
-    "concurrency_semantics_unresolved",
-    "irreversible_operation_unresolved",
-    "repeated_failure",
-)
-
-REVIEW_FLAGS = (
-    "public_contract_touched",
-    "schema_or_migration_touched",
-    "auth_or_permission_touched",
-    "concurrency_or_transaction_touched",
-    "irreversible_operation_touched",
-    "new_dependency_or_protocol_touched",
-    "weak_test_oracle",
-    "generated_or_shared_artifact_touched",
-    "repeated_failure_or_flaky",
-)
-
-TASK_CLASSES = ("trivial", "bounded", "complex_decided")
-BOUNDED_REASONING = ("mechanical", "logic")
+from policy_defs import BOUNDED_REASONING, DECISION_FLAGS, POLICY_VERSION, REVIEW_FLAGS, TASK_CLASSES
 
 
 class PolicyError(Exception):
