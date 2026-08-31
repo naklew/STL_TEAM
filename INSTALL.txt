@@ -1,7 +1,33 @@
-1) 대상 프로젝트에 templates/project/.codex/agents 폴더를 .codex/agents 로 복사
-2) examples/agents-defaults.toml 내용을 ~/.codex/config.toml 의 [agents] 설정과 병합
-3) 플러그인 스킬을 사용하는 경우 plugins/sol-luna-team/skills/sol-luna-team 내용을 기존 플러그인에 반영
-4) 새 Codex 세션을 gpt-5.6-terra / high 로 시작
-5) $sol-luna-team 으로 작업 요청
+SLT Hybrid v2 설치
 
-주의: 현재 GitHub 연결에는 push 권한이 없어 원본 저장소에는 자동 커밋하지 않았습니다.
+권장 방식: Codex plugin으로 설치
+
+1) marketplace 추가
+   codex plugin marketplace add naklew/STL_TEAM --ref hybrid-v2
+
+2) plugin 설치
+   codex plugin add sol-luna-team@sol-luna-team
+
+3) 대상 프로젝트에 custom agents와 project-scoped config 복사
+   - templates/project/.codex/agents/ → <target>/.codex/agents/
+   - templates/project/.codex/config.toml → <target>/.codex/config.toml
+
+4) 새 Codex 부모 세션을 다음으로 시작
+   - model: gpt-5.6-terra
+   - reasoning: high
+
+5) 명시적으로 호출
+   $sol-luna-team <작업 요청>
+
+핵심 정책
+- parent orchestration은 Terra High가 직접 수행한다.
+- Luna는 반드시 luna_worker 이름으로 좁은 bounded task에만 사용한다.
+- Terra worker는 이미 설계가 확정된 멀티파일 구현/통합에 사용한다.
+- Sol High는 objective risk flag가 활성화된 decision gate와 high-risk final review에만 사용한다.
+- Sol Max는 자동 사용하지 않는다.
+- shared workspace writer는 기본 1개, 정말 독립적인 경우만 2개까지 허용한다.
+- 전역 ~/.codex/config.toml에 Luna를 default_subagent_model로 지정하지 않는다.
+
+참고
+- plugin 설치/업데이트 후 새 Codex thread를 시작한다.
+- 실제 지원 모델/effort 이름은 사용하는 Codex 클라이언트와 계정에서 확인한다.
