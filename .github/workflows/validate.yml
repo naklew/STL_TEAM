@@ -21,5 +21,7 @@ jobs:
         run: python scripts/validate_repo.py
       - name: Run routing policy eval
         run: python scripts/run_policy_eval.py
-      - name: Run contract guard eval
+      - name: Run contract and write-set guard eval
         run: python scripts/run_guard_eval.py
+      - name: Run setup and linked-worktree eval
+        run: python scripts/run_setup_eval.py
