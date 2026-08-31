@@ -1,0 +1,6 @@
+[agents]
+enabled = true
+max_concurrent_threads_per_session = 2
+
+# Intentionally do not set a default_subagent_model.
+# Use named custom agents so Luna/Terra/Sol routing is explicit.
