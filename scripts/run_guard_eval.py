@@ -28,14 +28,6 @@ def run_tool(tool: Path, *args: str, cwd: Path, expect: int = 0) -> subprocess.C
     return proc
 
 
-def git_path(root: Path, rel: str) -> Path:
-    value = subprocess.check_output(["git", "-C", str(root), "rev-parse", "--git-path", rel], text=True).strip()
-    path = Path(value)
-    if not path.is_absolute():
-        path = root / path
-    return path.resolve()
-
-
 def write_contract(path: Path, head: str, *, task_id: str = "EVAL-001") -> dict:
     contract = {
         "id": task_id,
@@ -89,11 +81,13 @@ def main() -> int:
         run_tool(GUARD, "validate-task-contract", "--contract", str(contract_path), cwd=root)
         baseline_result = run_tool(GUARD, "create-task-baseline", "--contract", str(contract_path), cwd=root)
         baseline_path = Path(baseline_result.stdout.strip()).resolve()
-        expected_baseline = git_path(root, f"slt-baselines/{cg.safe_task_id('EVAL-001')}.baseline.json")
+        expected_baseline = cg.default_baseline_path(root, "EVAL-001").resolve()
         if baseline_path != expected_baseline:
             raise RuntimeError(f"baseline path mismatch expected={expected_baseline} actual={baseline_path}")
-        if (root / ".codex") in baseline_path.parents:
-            raise RuntimeError("baseline must not live in workspace .codex state")
+        if root == baseline_path or root in baseline_path.parents:
+            raise RuntimeError("protected baseline must live outside the worktree")
+        if not baseline_path.is_file():
+            raise RuntimeError("protected baseline file was not created")
 
         # Allowed tracked modification passes.
         (root / "allowed.txt").write_text("changed\n", encoding="utf-8")
@@ -140,7 +134,7 @@ def main() -> int:
             raise RuntimeError("rename target was not detected")
         os.rename(root / "renamed.txt", root / "allowed.txt")
 
-        # Case-only rename must be visible on case-sensitive CI filesystems.
+        # Case-only rename is visible on case-sensitive CI filesystems.
         os.rename(root / "allowed.txt", root / "ALLOWED.txt")
         out = run_tool(GUARD, "verify-write-set", "--contract", str(contract_path), cwd=root, expect=3)
         if "ALLOWED.txt" not in out.stdout:
