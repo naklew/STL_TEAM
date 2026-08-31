@@ -1,15 +1,15 @@
 #!/usr/bin/env python3
 """Machine-verifiable SLT task contracts and write-set guard.
 
-v0.4.0 improvements:
+SLT v0.4 hotfix behavior:
 - tracked, non-ignored untracked, and ignored untracked files are snapshotted;
-- explicit snapshot_exclude patterns are visible in the contract;
-- baselines live in an external per-worktree SLT state directory outside the workspace;
-- base_revision must match HEAD when the baseline is created;
-- HEAD and contract hash must remain unchanged through verification;
+- actual filesystem casing is preserved so case-only renames are visible on Windows;
+- runtime state defaults to <worktree>/.codex/slt-state, writable under Codex workspace-write;
+- baseline integrity is protected by a parent-held SHA-256 seal required at verification time;
+- base_revision must match HEAD and HEAD must remain unchanged;
 - a matching worktree-scoped writer lock is required.
 
-Semantic risk classification remains a model/user judgment. This tool enforces
+Semantic risk classification remains model/user judgment. This tool enforces
 what can be made deterministic after a contract exists.
 """
 
@@ -25,7 +25,14 @@ import subprocess
 import sys
 from typing import Any
 
-from policy_defs import AGENT_BUNDLE_VERSION, BOUNDED_REASONING, DECISION_FLAGS, POLICY_VERSION, REVIEW_FLAGS, TASK_CLASSES
+from policy_defs import (
+    AGENT_BUNDLE_VERSION,
+    BOUNDED_REASONING,
+    DECISION_FLAGS,
+    POLICY_VERSION,
+    REVIEW_FLAGS,
+    TASK_CLASSES,
+)
 
 REQUIRED_FIELDS = (
     "id", "policy_version", "agent_bundle_version", "base_revision", "goal",
@@ -55,16 +62,19 @@ def load_json(path: Path) -> dict[str, Any]:
         data = json.loads(path.read_text(encoding="utf-8"))
     except FileNotFoundError as exc:
         raise GuardError(f"file not found: {path}") from exc
-    except json.JSONDecodeError as exc:
-        raise GuardError(f"invalid JSON in {path}: {exc}") from exc
+    except (OSError, json.JSONDecodeError) as exc:
+        raise GuardError(f"cannot read JSON {path}: {exc}") from exc
     if not isinstance(data, dict):
         raise GuardError(f"expected JSON object in {path}")
     return data
 
 
 def save_json(path: Path, data: Any) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(data, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(data, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    except OSError as exc:
+        raise GuardError(f"cannot write {path}: {exc}") from exc
 
 
 def canonical_contract(contract: dict[str, Any]) -> bytes:
@@ -74,6 +84,17 @@ def canonical_contract(contract: dict[str, Any]) -> bytes:
 
 def compute_contract_hash(contract: dict[str, Any]) -> str:
     return "sha256:" + hashlib.sha256(canonical_contract(contract)).hexdigest()
+
+
+def sha256_file(path: Path) -> str:
+    h = hashlib.sha256()
+    try:
+        with path.open("rb") as f:
+            for chunk in iter(lambda: f.read(1024 * 1024), b""):
+                h.update(chunk)
+    except OSError as exc:
+        raise GuardError(f"cannot hash {path}: {exc}") from exc
+    return "sha256:" + h.hexdigest()
 
 
 def validate_bool_map(name: str, value: Any, expected_keys: tuple[str, ...]) -> list[str]:
@@ -150,16 +171,6 @@ def git_root(start: Path | None = None) -> Path:
     return Path(proc.stdout.strip()).resolve()
 
 
-def git_path(root: Path, rel: str) -> Path:
-    proc = subprocess.run(["git", "-C", str(root), "rev-parse", "--git-path", rel], capture_output=True, text=True)
-    if proc.returncode != 0 or not proc.stdout.strip():
-        raise GuardError(f"cannot resolve git path {rel}: {proc.stderr.strip()}")
-    path = Path(proc.stdout.strip())
-    if not path.is_absolute():
-        path = root / path
-    return path.resolve()
-
-
 def git_head(root: Path) -> str:
     proc = subprocess.run(["git", "-C", str(root), "rev-parse", "HEAD"], capture_output=True, text=True)
     return proc.stdout.strip() if proc.returncode == 0 else "UNBORN"
@@ -180,29 +191,76 @@ def matches(path: str, patterns: list[str] | tuple[str, ...]) -> bool:
     return any(fnmatch.fnmatchcase(path, pattern) for pattern in patterns)
 
 
+def _dir_case_maps(directory: Path, cache: dict[str, tuple[dict[str, str], dict[str, list[str]]]]) -> tuple[dict[str, str], dict[str, list[str]]]:
+    key = str(directory)
+    if key in cache:
+        return cache[key]
+    exact: dict[str, str] = {}
+    folded: dict[str, list[str]] = {}
+    try:
+        with os.scandir(directory) as entries:
+            for entry in entries:
+                exact[entry.name] = entry.name
+                folded.setdefault(entry.name.casefold(), []).append(entry.name)
+    except OSError:
+        pass
+    cache[key] = (exact, folded)
+    return exact, folded
+
+
+def actual_case_rel(root: Path, rel: str, cache: dict[str, tuple[dict[str, str], dict[str, list[str]]]]) -> str:
+    """Return actual directory-entry casing for a Git-reported path."""
+    current = root
+    actual_parts: list[str] = []
+    for part in rel.replace("\\", "/").split("/"):
+        if not part:
+            continue
+        exact, folded = _dir_case_maps(current, cache)
+        if part in exact:
+            chosen = part
+        else:
+            candidates = folded.get(part.casefold(), [])
+            chosen = candidates[0] if len(candidates) == 1 else part
+        actual_parts.append(chosen)
+        current = current / chosen
+    return "/".join(actual_parts)
+
+
 def worktree_paths(root: Path, snapshot_exclude: list[str]) -> list[str]:
-    # Separate queries are intentional: ignored untracked files must be included.
-    paths = run_ls(root, ["-c"])
-    paths |= run_ls(root, ["-o", "--exclude-standard"])
-    paths |= run_ls(root, ["-o", "-i", "--exclude-standard"])
+    raw = run_ls(root, ["-c"])
+    raw |= run_ls(root, ["-o", "--exclude-standard"])
+    raw |= run_ls(root, ["-o", "-i", "--exclude-standard"])
+    cache: dict[str, tuple[dict[str, str], dict[str, list[str]]]] = {}
     exclusions = list(RUNTIME_EXCLUDES) + snapshot_exclude
-    return sorted(path for path in paths if not matches(path, exclusions))
+    paths: set[str] = set()
+    for rel in raw:
+        actual = actual_case_rel(root, rel, cache)
+        if not matches(actual, exclusions):
+            paths.add(actual)
+    return sorted(paths)
 
 
 def hash_path(path: Path) -> str:
     if path.is_symlink():
-        return hashlib.sha256(("SYMLINK\0" + os.readlink(path)).encode("utf-8", errors="surrogateescape")).hexdigest()
+        try:
+            target = os.readlink(path)
+        except OSError as exc:
+            raise GuardError(f"cannot read symlink {path}: {exc}") from exc
+        return hashlib.sha256(("SYMLINK\0" + target).encode("utf-8", errors="surrogateescape")).hexdigest()
     h = hashlib.sha256()
-    with path.open("rb") as f:
-        for chunk in iter(lambda: f.read(1024 * 1024), b""):
-            h.update(chunk)
+    try:
+        with path.open("rb") as f:
+            for chunk in iter(lambda: f.read(1024 * 1024), b""):
+                h.update(chunk)
+    except OSError as exc:
+        raise GuardError(f"cannot hash worktree path {path}: {exc}") from exc
     return h.hexdigest()
 
 
 def snapshot(root: Path, snapshot_exclude: list[str]) -> dict[str, str]:
     result: dict[str, str] = {}
     for rel in worktree_paths(root, snapshot_exclude):
-        p = root / rel
+        p = root / Path(rel.replace("/", os.sep))
         if p.is_file() or p.is_symlink():
             result[rel] = hash_path(p)
     return result
@@ -216,31 +274,52 @@ def safe_task_id(task_id: str) -> str:
     return "".join(c if c.isalnum() or c in "-_." else "_" for c in task_id)
 
 
-def external_state_root(root: Path) -> Path:
+def worktree_identity(root: Path) -> str:
+    return hashlib.sha256(str(root.resolve()).encode("utf-8", errors="surrogateescape")).hexdigest()[:24]
+
+
+def state_root(root: Path) -> Path:
     configured = os.environ.get("SLT_STATE_HOME")
-    base = Path(configured).expanduser() if configured else Path.home() / ".codex" / "slt-state"
-    identity = hashlib.sha256(str(root.resolve()).encode("utf-8", errors="surrogateescape")).hexdigest()[:24]
-    path = (base / "baselines" / identity).resolve()
-    path.mkdir(parents=True, exist_ok=True)
+    if configured:
+        base = Path(configured).expanduser()
+        if not base.is_absolute():
+            base = root / base
+        path = base / "worktrees" / worktree_identity(root)
+    else:
+        path = root / ".codex" / "slt-state"
     try:
-        os.chmod(path, 0o700)
-    except OSError:
-        pass
-    return path
+        path.mkdir(parents=True, exist_ok=True)
+    except OSError as exc:
+        raise GuardError(f"cannot create SLT runtime state at {path}: {exc}. Use a writable workspace path or set SLT_STATE_HOME explicitly.") from exc
+    return path.resolve()
 
 
 def default_baseline_path(root: Path, task_id: str) -> Path:
-    return external_state_root(root) / f"{safe_task_id(task_id)}.baseline.json"
+    path = state_root(root) / "baselines" / f"{safe_task_id(task_id)}.baseline.json"
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+    except OSError as exc:
+        raise GuardError(f"cannot create baseline directory {path.parent}: {exc}") from exc
+    return path
+
+
+def writer_lock_path(root: Path) -> Path:
+    path = state_root(root) / "locks" / "slt-writer.lock"
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+    except OSError as exc:
+        raise GuardError(f"cannot create lock directory {path.parent}: {exc}") from exc
+    return path
 
 
 def writer_lock(root: Path) -> dict[str, Any] | None:
-    path = git_path(root, "slt-writer.lock")
+    path = writer_lock_path(root)
     if not path.exists():
         return None
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
     except Exception as exc:
-        raise GuardError(f"invalid writer lock: {exc}") from exc
+        raise GuardError(f"invalid writer lock {path}: {exc}") from exc
     return data if isinstance(data, dict) else None
 
 
@@ -288,7 +367,7 @@ def cmd_baseline(args: argparse.Namespace) -> int:
         raise GuardError(f"base_revision {contract['base_revision']} does not match HEAD {current_head}")
     require_writer_lock(root, contract["id"])
     baseline = {
-        "format_version": 2,
+        "format_version": 3,
         "task_id": contract["id"],
         "contract_hash": contract["contract_hash"],
         "policy_version": POLICY_VERSION,
@@ -299,11 +378,13 @@ def cmd_baseline(args: argparse.Namespace) -> int:
     }
     out = Path(args.output).resolve() if args.output else default_baseline_path(root, contract["id"])
     save_json(out, baseline)
-    try:
-        os.chmod(out, 0o600)
-    except OSError:
-        pass
-    print(out)
+    seal = sha256_file(out)
+    payload = {"baseline": str(out), "baseline_sha256": seal}
+    if args.json:
+        print(json.dumps(payload, sort_keys=True))
+    else:
+        print(f"BASELINE {out}")
+        print(f"BASELINE_SHA256 {seal}")
     return 0
 
 
@@ -319,8 +400,10 @@ def cmd_verify(args: argparse.Namespace) -> int:
             eprint("ERROR:", error)
         return 2
     require_writer_lock(root, contract["id"])
-
     baseline_path = Path(args.baseline).resolve() if args.baseline else default_baseline_path(root, contract["id"])
+    actual_baseline_sha = sha256_file(baseline_path)
+    if actual_baseline_sha != args.baseline_sha:
+        raise GuardError(f"baseline SHA mismatch: expected {args.baseline_sha}, got {actual_baseline_sha}")
     baseline = load_json(baseline_path)
     if baseline.get("task_id") != contract["id"]:
         raise GuardError("baseline task_id does not match contract")
@@ -334,7 +417,6 @@ def cmd_verify(args: argparse.Namespace) -> int:
         raise GuardError("HEAD changed after baseline creation")
     if baseline.get("snapshot_exclude") != contract.get("snapshot_exclude"):
         raise GuardError("snapshot_exclude changed after baseline creation")
-
     before = baseline.get("snapshot")
     if not isinstance(before, dict):
         raise GuardError("baseline snapshot is missing or invalid")
@@ -342,7 +424,6 @@ def cmd_verify(args: argparse.Namespace) -> int:
     allowed = list(contract.get("allowed_files", []))
     shared = list(contract.get("shared_or_generated_files", []))
     forbidden = list(contract.get("forbidden_files", []))
-
     violations: list[dict[str, str]] = []
     rows: list[dict[str, str]] = []
     for path in changed:
@@ -357,8 +438,14 @@ def cmd_verify(args: argparse.Namespace) -> int:
             status = "UNDECLARED"
             violations.append({"path": path, "reason": status})
         rows.append({"path": path, "status": status})
-
-    result = {"task_id": contract["id"], "contract_hash": contract["contract_hash"], "changed": rows, "violations": violations, "ok": not violations}
+    result = {
+        "task_id": contract["id"],
+        "contract_hash": contract["contract_hash"],
+        "baseline_sha256": args.baseline_sha,
+        "changed": rows,
+        "violations": violations,
+        "ok": not violations,
+    }
     if args.json:
         print(json.dumps(result, indent=2, sort_keys=True))
     else:
@@ -373,10 +460,27 @@ def cmd_verify(args: argparse.Namespace) -> int:
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description=__doc__)
     sub = p.add_subparsers(dest="command", required=True)
-    h = sub.add_parser("hash-contract"); h.add_argument("--contract", required=True); h.add_argument("--write", action="store_true"); h.set_defaults(func=cmd_hash)
-    v = sub.add_parser("validate-task-contract"); v.add_argument("--contract", required=True); v.add_argument("--allow-missing-hash", action="store_true"); v.set_defaults(func=cmd_validate)
-    b = sub.add_parser("create-task-baseline"); b.add_argument("--contract", required=True); b.add_argument("--repo"); b.add_argument("--output"); b.set_defaults(func=cmd_baseline)
-    w = sub.add_parser("verify-write-set"); w.add_argument("--contract", required=True); w.add_argument("--repo"); w.add_argument("--baseline"); w.add_argument("--json", action="store_true"); w.set_defaults(func=cmd_verify)
+    h = sub.add_parser("hash-contract")
+    h.add_argument("--contract", required=True)
+    h.add_argument("--write", action="store_true")
+    h.set_defaults(func=cmd_hash)
+    v = sub.add_parser("validate-task-contract")
+    v.add_argument("--contract", required=True)
+    v.add_argument("--allow-missing-hash", action="store_true")
+    v.set_defaults(func=cmd_validate)
+    b = sub.add_parser("create-task-baseline")
+    b.add_argument("--contract", required=True)
+    b.add_argument("--repo")
+    b.add_argument("--output")
+    b.add_argument("--json", action="store_true")
+    b.set_defaults(func=cmd_baseline)
+    w = sub.add_parser("verify-write-set")
+    w.add_argument("--contract", required=True)
+    w.add_argument("--repo")
+    w.add_argument("--baseline")
+    w.add_argument("--baseline-sha", required=True)
+    w.add_argument("--json", action="store_true")
+    w.set_defaults(func=cmd_verify)
     return p
 
 
