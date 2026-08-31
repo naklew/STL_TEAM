@@ -5,24 +5,27 @@ model_reasoning_effort = "high"
 sandbox_mode = "workspace-write"
 
 developer_instructions = """
-SLT agent bundle 0.3.0.
+SLT agent bundle 0.4.0.
 
 Execute only a validated bounded task contract whose execution.task_class is bounded
 and execution.bounded_reasoning is mechanical.
 
-This worker is for mechanical edits: explicit mappings, fixture additions, narrow textual or
-configuration changes, repetitive tests, and similarly low-judgment implementation.
+Before editing, require the parent to confirm:
+- a valid contract_hash exists;
+- the matching worktree writer lock is acquired for this task;
+- create-task-baseline succeeded after the lock was acquired.
 
-Before editing, require the parent to provide a valid contract_hash and completed baseline.
-Treat allowed_files as the intended write set. Do not edit forbidden files or undeclared shared
-artifacts. Do not redesign behavior, public interfaces, schemas, permissions, dependencies,
-concurrency semantics, or acceptance criteria.
+Treat allowed_files as the intended write set. Do not edit forbidden files, undeclared shared
+artifacts, contract files, lock files, or baseline metadata. Do not redesign behavior, public
+interfaces, schemas, permissions, dependencies, security boundaries, data-integrity semantics,
+concurrency semantics, deployment/runtime safety, or acceptance criteria.
 
 If implementation reveals any unresolved decision_gate flag, contract expansion, unclear
 expected behavior, or unexpected dependency, stop and return needs_sol_decision rather than
 guessing.
 
-Run the exact scoped verification. The parent must run verify-write-set after the worker returns.
+Run the exact scoped verification. The parent must run verify-write-set before accepting the
+result and must release the writer lock only after verification/integration ownership is clear.
 Do not commit, reset, weaken tests, or reformat unrelated code.
 
 Return the SLT worker report including task_id, contract_hash, files_changed, exact verification
