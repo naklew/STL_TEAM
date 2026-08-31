@@ -1,14 +1,15 @@
 #!/usr/bin/env python3
 """Single-writer lock for SLT shared-workspace execution.
 
-The lock lives in the current Git worktree's private gitdir (resolved with
-`git rev-parse --git-path`), so two writers cannot be active in the same
-worktree while independent Git worktrees can proceed separately.
+By default the lock lives at <worktree>/.codex/slt-state/locks/slt-writer.lock,
+which is writable under normal Codex workspace-write. Separate Git worktrees
+therefore get independent locks. SLT_STATE_HOME may override the state root.
 """
 
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -31,18 +32,33 @@ def git_root(start: Path | None = None) -> Path:
     return Path(proc.stdout.strip()).resolve()
 
 
-def git_path(root: Path, rel: str) -> Path:
-    proc = subprocess.run(["git", "-C", str(root), "rev-parse", "--git-path", rel], capture_output=True, text=True)
-    if proc.returncode != 0 or not proc.stdout.strip():
-        raise LockError(f"cannot resolve git path {rel}: {proc.stderr.strip()}")
-    path = Path(proc.stdout.strip())
-    if not path.is_absolute():
-        path = root / path
+def worktree_identity(root: Path) -> str:
+    return hashlib.sha256(str(root.resolve()).encode("utf-8", errors="surrogateescape")).hexdigest()[:24]
+
+
+def state_root(root: Path) -> Path:
+    configured = os.environ.get("SLT_STATE_HOME")
+    if configured:
+        base = Path(configured).expanduser()
+        if not base.is_absolute():
+            base = root / base
+        path = base / "worktrees" / worktree_identity(root)
+    else:
+        path = root / ".codex" / "slt-state"
+    try:
+        path.mkdir(parents=True, exist_ok=True)
+    except OSError as exc:
+        raise LockError(f"cannot create SLT runtime state at {path}: {exc}. Use a writable workspace path or set SLT_STATE_HOME explicitly.") from exc
     return path.resolve()
 
 
 def lock_path(root: Path) -> Path:
-    return git_path(root, LOCK_NAME)
+    path = state_root(root) / "locks" / LOCK_NAME
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+    except OSError as exc:
+        raise LockError(f"cannot create lock directory {path.parent}: {exc}") from exc
+    return path
 
 
 def read_lock(path: Path) -> dict | None:
@@ -57,7 +73,6 @@ def read_lock(path: Path) -> dict | None:
 
 def acquire(root: Path, task_id: str) -> int:
     path = lock_path(root)
-    path.parent.mkdir(parents=True, exist_ok=True)
     payload = {
         "task_id": task_id,
         "worktree": str(root),
@@ -71,9 +86,18 @@ def acquire(root: Path, task_id: str) -> int:
         current = read_lock(path)
         print(f"LOCKED {json.dumps(current, sort_keys=True)}", file=sys.stderr)
         return 3
-    with os.fdopen(fd, "w", encoding="utf-8") as f:
-        json.dump(payload, f, indent=2, sort_keys=True)
-        f.write("\n")
+    except OSError as exc:
+        raise LockError(f"cannot create writer lock {path}: {exc}") from exc
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            json.dump(payload, f, indent=2, sort_keys=True)
+            f.write("\n")
+    except OSError as exc:
+        try:
+            path.unlink(missing_ok=True)
+        except OSError:
+            pass
+        raise LockError(f"cannot write writer lock {path}: {exc}") from exc
     print(f"ACQUIRED {task_id} {path}")
     return 0
 
@@ -87,7 +111,10 @@ def release(root: Path, task_id: str, force: bool) -> int:
     if not force and current.get("task_id") != task_id:
         print(f"REFUSED lock belongs to {current.get('task_id')}", file=sys.stderr)
         return 4
-    path.unlink()
+    try:
+        path.unlink()
+    except OSError as exc:
+        raise LockError(f"cannot remove writer lock {path}: {exc}") from exc
     print(f"RELEASED {task_id}")
     return 0
 
