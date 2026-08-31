@@ -1,0 +1,7 @@
+interface:
+  display_name: "Sol–Luna–Terra Team · Cost Aware"
+  short_description: "Terra leads; Sol decides and reviews; Luna implements bounded tasks."
+  brand_color: "#7C3AED"
+  default_prompt: "Use $sol-luna-team with Terra as the cost-aware lead. Invoke Sol only for material decisions and final review, and use Luna for bounded implementation."
+policy:
+  allow_implicit_invocation: true

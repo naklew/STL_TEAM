@@ -1,0 +1,13 @@
+# DK cost-aware defaults for ~/.codex/config.toml
+
+[agents]
+enabled = true
+max_concurrent_threads_per_session = 2
+default_subagent_model = "gpt-5.6-luna"
+default_subagent_reasoning_effort = "max"
+
+# Recommended parent session:
+# gpt-5.6-terra / high
+#
+# Increase max_concurrent_threads_per_session to 3 only when the work
+# can be split into genuinely independent file ownership.
