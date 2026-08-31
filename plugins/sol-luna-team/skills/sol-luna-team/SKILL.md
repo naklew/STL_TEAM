@@ -1,153 +1,207 @@
 ---
 name: sol-luna-team
-description: "Cost-aware Codex development team. Terra leads routine exploration, implementation and integration; Sol is invoked only for architecture/decision gates and final review; Luna performs bounded implementation."
+description: "Hybrid cost-aware Codex team. Terra High leads the parent session, Luna Max handles narrow bounded implementation, Terra High handles already-decided complex work, and Sol High is reserved for objective risk gates and final high-risk review."
 ---
 
-# Sol–Luna–Terra cost-aware coding team
+# SLT Hybrid cost-aware coding team
 
-Use this skill for authorized software implementation, bug fixes, refactors, and test work
-where Sol-level judgment is valuable but spending Sol tokens on the entire implementation is not.
+Use this skill for authorized software implementation, bug fixes, refactors, and test work when Sol-level judgment is valuable but spending Sol tokens on the entire workflow is not.
 
-## Objective
+## Operating objective
 
-Preserve high-quality architectural and review decisions while moving routine token-heavy work
-to Terra and Luna.
+Minimize Sol usage without letting lower-cost models make material design decisions accidentally.
 
 Recommended parent session:
-- `gpt-5.6-terra`
-- reasoning `high`
+- model: `gpt-5.6-terra`
+- reasoning: `high`
 
-The skill cannot change the parent session model. For best cost/quality behavior, start the
-parent Codex session on Terra High.
+The skill cannot change the parent model. Start a new parent Codex session on Terra High for the intended behavior.
 
 ## Roles
 
 | Work | Agent | Model / effort |
 | --- | --- | --- |
-| Parent orchestration, repository exploration, integration, verification | `terra_orchestrator` | Terra High |
-| Architecture, ambiguous requirements, material design decisions | `sol_architect` | Sol High |
+| Parent orchestration, reconnaissance, integration, verification | parent session | Terra High |
+| Architecture, ambiguous requirements, public contracts, high-risk decisions | `sol_architect` | Sol High |
 | Narrow independently verifiable implementation | `luna_worker` | Luna Max |
-| Multi-file but already-decided implementation / integration repair | `terra_worker` | Terra High |
-| Final correctness/security/contract review | `sol_reviewer` | Sol High |
+| Multi-file but already-decided implementation and focused repair | `terra_worker` | Terra High |
+| High-risk final correctness/security/contract review | `sol_reviewer` | Sol High |
 
-Never escalate to Sol Max automatically. Max is a manual exception for unresolved,
-high-impact architecture, debugging, or security decisions.
+Do not use a child orchestrator. The parent Terra session follows this skill directly.
+Never invoke Sol Max automatically. Recommend Max only after Sol High cannot resolve a high-impact architecture, security, concurrency, or root-cause decision, and obtain user approval before escalation.
 
-## Decision gate
+## 1. Terra reconnaissance
 
-Before invoking Sol, ask whether the task requires a material judgment.
+Before delegation:
 
-Use Sol only for:
-- ambiguous requirements
-- architecture choices
-- public API/interface/schema/data-model changes
-- security-sensitive behavior
-- conflicting constraints
-- hard debugging where materially different hypotheses imply different fixes
+1. inspect repository instructions and current working-tree diff;
+2. identify the base revision or working baseline;
+3. locate relevant modules, public contracts, tests, generated/shared artifacts, and verification commands;
+4. preserve pre-existing user changes;
+5. record directly observed facts with file/symbol or command evidence.
 
-Do not use Sol merely for:
-- repository search
-- locating files
-- routine implementation
-- running tests/build/lint/type-check
-- mechanical refactors
-- known-pattern multi-file edits
-- straightforward test repair
+Read-only reconnaissance may be parallelized to 2-3 workers when useful. Shared-workspace writers should default to one active writer.
 
-## Workflow
+## 2. Deterministic risk classifier
 
-### 1. Terra reconnaissance
+Before implementation, populate these flags:
 
-Inspect:
-- current repository instructions
-- current diff and pre-existing user edits
-- relevant modules
-- tests/build/lint/type-check commands
-- conventions and dependencies
+```yaml
+risk_flags:
+  public_contract_change: false
+  schema_or_migration: false
+  auth_or_permission: false
+  concurrency_or_transaction: false
+  irreversible_operation: false
+  new_dependency_or_protocol: false
+  ambiguous_acceptance_criteria: false
+  multiple_plausible_root_causes: false
+  contract_expansion_required: false
+  repeated_failure: false
+  weak_test_oracle_or_test_bypass_risk: false
+  generated_or_shared_artifact_change: false
+```
 
-Produce a concise evidence packet. Do not send unrelated repository context to Sol.
+### Mandatory Sol decision gate
 
-### 2. Sol architecture gate, only when needed
+Invoke `sol_architect` before implementation, or return to it immediately if discovered later, when a material flag is true:
 
-Invoke `sol_architect` with:
-- user requirement
-- concise Terra findings
-- relevant files/symbols
-- material unknowns
-- constraints
+- public contract/API/interface behavior changes;
+- schema, migration, persistence model, or backward compatibility changes;
+- authentication, authorization, approval, or trust-boundary behavior changes;
+- concurrency, transactionality, idempotency, locking, race, ordering, or distributed consistency decisions are involved;
+- an operation is materially irreversible or destructive;
+- a new dependency, protocol, framework, or external integration changes system design;
+- acceptance criteria are materially ambiguous;
+- multiple plausible root causes imply materially different fixes;
+- implementation requires expanding the approved contract or file boundary;
+- a bounded task has failed twice, is flaky/non-deterministic, or cannot be verified confidently;
+- tests pass only because the oracle is weak, behavior is bypassed, or tests appear weakened;
+- generated/shared artifacts have cross-task, migration, release, or dependency impact.
 
-Sol returns decisions and bounded task contracts. Sol does not edit code.
+Do not send product choices, business approval questions, or missing user preferences to Sol. Ask the user instead.
 
-If no material decision exists, Terra creates the contracts directly.
+If all material flags are false and expected behavior is already frozen, Terra may create the task contract directly.
 
-### 3. Implementation routing
+## 3. Sol context packet
 
-Use Luna only when:
-- goal and acceptance criteria are unambiguous
-- work can be independently verified
-- allowed files are explicit
-- public interfaces/schema/architecture are frozen
-- write ownership does not overlap another active worker
+When crossing a Sol gate, use `references/context-packet.md`.
 
-Use Terra worker when:
-- implementation spans modules
-- integration is required
-- repository exploration must continue
-- a Luna failure can be repaired without a new design decision
+Do not give Sol only a prose summary and do not dump the entire repository. Provide:
+- original requirement;
+- base revision;
+- observed facts with evidence;
+- invariants and unknowns;
+- risk flags;
+- exact relevant files/symbols and why they matter;
+- alternatives considered;
+- current task contracts;
+- relevant diff/patch;
+- verification evidence.
 
-If execution discovers a new material decision, stop that item and return to `sol_architect`.
+Sol should directly read the material contract/interface/test/change files when needed. If a relevant fact is missing, Sol may request a targeted read instead of accepting Terra's framing.
 
-### 4. Parallelism
+If the same Sol thread can safely be reused for final review, reuse it to preserve decision continuity. Thread reuse is an optimization, not a correctness requirement; otherwise send a complete structured context packet to a new Sol reviewer.
 
-Start with one worker.
+## 4. Task contracts
 
-Use two workers when tasks have clearly independent file ownership.
-Use three only when independence is obvious and time savings justify the extra token use.
+Every delegated writer must receive an explicit contract based on `references/task-contract.md`.
 
-Never run concurrent workers with overlapping write ownership.
+A contract includes:
+- `base_revision` and `contract_hash`;
+- `read_scope`;
+- `allowed_files` and `forbidden_files`;
+- `shared_or_generated_files`;
+- acceptance criteria;
+- scoped verification and integration verification;
+- dependencies;
+- risk flags and escalation conditions.
 
-### 5. Integration
+`allowed_files` is a prompt-level contract, not a sandbox-enforced ACL. Record the baseline diff before dispatch and compare changed files after completion. Any undeclared changed file is a contract violation until explained and approved.
 
-Terra lead:
-1. inspects the complete diff
-2. checks every changed file against a contract
-3. runs all relevant tests
-4. runs lint/type-check/build as applicable
-5. repairs integration-only problems that do not require new design decisions
+## 5. Implementation routing
 
-### 6. Sol final review
+### Luna Max
 
-For medium or large changes, invoke `sol_reviewer` once after integrated verification.
+Use `luna_worker` only when ALL are true:
+- design and expected behavior are frozen;
+- task is narrow, objective, and independently verifiable;
+- file ownership is explicit;
+- no mandatory Sol risk flag is unresolved;
+- no other active writer owns or may generate the same artifacts.
 
-Provide:
-- original requirement
-- architecture decisions
-- task contracts
-- complete relevant diff
-- verification evidence
+### Terra High
 
-Do not send unchanged files unless needed to understand a contract.
+Use `terra_worker` when:
+- implementation spans multiple files but design is already decided;
+- integration or repository-aware repair is required;
+- a Luna failure can be repaired without a new material decision;
+- focused debugging has one evidence-backed hypothesis and a defined expected outcome.
 
-If review returns blocker or important findings, create a bounded follow-up for Luna or Terra.
-Invoke Sol again only if the repair itself requires a new material decision.
+If a worker discovers a mandatory risk flag, contract expansion, or a second failure, stop implementation and return to Sol rather than guessing.
 
-For trivial bounded changes, Sol review may be skipped unless contract/security risk exists.
+## 6. Parallelism and write safety
 
-## Token discipline
+Default to one shared-workspace writer.
 
-- Terra performs repository reconnaissance before Sol.
-- Sol receives compressed evidence, not a broad repository dump.
-- Sol does not implement routine code.
-- Sol does not rerun routine verification.
-- Sol reviews relevant diffs, not the whole codebase.
-- Avoid repeated Sol reviews after non-material fixes.
-- Do not use parallel workers solely because concurrency is available.
+Allow two writers only when their owned files and generated/shared artifacts are genuinely independent. Prefer separate worktrees if concurrent write-heavy work is necessary.
+
+Serialize:
+- lockfile updates;
+- migrations;
+- generated code;
+- snapshots;
+- formatters that may touch broad paths;
+- full builds/tests that mutate shared state;
+- shared development servers or databases.
+
+Read-only explorers/tests/triage may run in parallel when they do not mutate shared state.
+
+## 7. Integration on Terra
+
+After writers finish:
+
+1. inspect the complete diff against the baseline;
+2. verify changed files against each task contract;
+3. reject or explain undeclared file changes;
+4. run scoped tests, then integration-relevant tests;
+5. run lint/type-check/build as applicable;
+6. distinguish code failures from environment-only limitations;
+7. set `repeated_failure` or `weak_test_oracle_or_test_bypass_risk` when evidence warrants it.
+
+Terra may repair integration-only issues only if no new mandatory Sol flag becomes true.
+
+## 8. Risk-based Sol final review
+
+Sol review is mandatory when:
+- Sol designed or approved a material decision earlier;
+- any high-risk flag was true;
+- security/auth/schema/concurrency/public-contract behavior changed;
+- verification evidence is incomplete or test quality is questionable;
+- the final diff materially exceeds the original bounded plan.
+
+Sol review is conditional for routine medium changes and may be skipped for trivial, objectively verified, low-risk changes.
+
+Provide the original requirement, Sol decisions, contracts, relevant diff, risk flags, and verification evidence. Do not send unchanged unrelated files.
+
+If review returns blocker/important findings, create a bounded repair for Luna or Terra. Reinvoke Sol only when the repair changes a material decision, invalidates the prior review assumptions, or itself crosses a mandatory risk flag.
+
+## 9. Token discipline
+
+- Terra performs reconnaissance and routine verification.
+- Luna handles only cheap, bounded execution.
+- Sol handles decision gates and high-risk review, not routine coding.
+- Do not repeat repository exploration in Sol when Terra has already indexed the evidence.
+- Do not hide relevant raw evidence behind summaries.
+- Do not parallelize merely because concurrency exists.
+- Optimize for `Sol tokens + rework`, not minimum total tokens.
 
 ## Worker result
 
 ```yaml
 status: success | blocked | needs_escalation | needs_sol_decision
 task_id: TASK-ID
+contract_hash: <hash>
 summary: one sentence
 files_changed:
   - path
@@ -155,19 +209,21 @@ verification:
   - command: command
     result: passed | failed | not_run
     notes: concise evidence
+risk_flags_changed:
+  - none
 risks:
   - none
 escalation_reason: null
 ```
 
-A prose claim such as "looks good" is not verification evidence.
+A prose claim such as `looks good` is not verification evidence.
 
 ## Completion handoff
 
 Report:
-- Sol decision calls made and why
-- Luna/Terra task allocation
-- changed files
-- exact verification commands and results
-- review findings and repairs
-- remaining risks
+- Sol decision/review calls made and why;
+- task allocation to Luna/Terra;
+- changed files and contract-boundary checks;
+- exact verification commands and results;
+- review findings and repairs;
+- unresolved risks and environment limitations.
