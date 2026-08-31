@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Self-test SLT contract hashing, external baselines, ignored files, and locks."""
+"""Self-test SLT contract hashing, protected baselines, ignored files, and locks."""
 
 from __future__ import annotations
 
@@ -26,6 +26,14 @@ def run_tool(tool: Path, *args: str, cwd: Path, expect: int = 0) -> subprocess.C
             f"stdout={proc.stdout}\nstderr={proc.stderr}"
         )
     return proc
+
+
+def git_path(root: Path, rel: str) -> Path:
+    value = subprocess.check_output(["git", "-C", str(root), "rev-parse", "--git-path", rel], text=True).strip()
+    path = Path(value)
+    if not path.is_absolute():
+        path = root / path
+    return path.resolve()
 
 
 def write_contract(path: Path, head: str, *, task_id: str = "EVAL-001") -> dict:
@@ -58,7 +66,7 @@ def write_contract(path: Path, head: str, *, task_id: str = "EVAL-001") -> dict:
 
 def main() -> int:
     with tempfile.TemporaryDirectory(prefix="slt-guard-eval-") as td:
-        root = Path(td)
+        root = Path(td).resolve()
         subprocess.run(["git", "init", "-q"], cwd=root, check=True)
         subprocess.run(["git", "config", "user.email", "slt@example.invalid"], cwd=root, check=True)
         subprocess.run(["git", "config", "user.name", "SLT Eval"], cwd=root, check=True)
@@ -80,9 +88,12 @@ def main() -> int:
         run_tool(LOCK, "acquire", "--task-id", "OTHER", cwd=root, expect=3)
         run_tool(GUARD, "validate-task-contract", "--contract", str(contract_path), cwd=root)
         baseline_result = run_tool(GUARD, "create-task-baseline", "--contract", str(contract_path), cwd=root)
-        baseline_path = Path(baseline_result.stdout.strip())
-        if root in baseline_path.parents:
-            raise RuntimeError("baseline must live outside the worktree")
+        baseline_path = Path(baseline_result.stdout.strip()).resolve()
+        expected_baseline = git_path(root, f"slt-baselines/{cg.safe_task_id('EVAL-001')}.baseline.json")
+        if baseline_path != expected_baseline:
+            raise RuntimeError(f"baseline path mismatch expected={expected_baseline} actual={baseline_path}")
+        if (root / ".codex") in baseline_path.parents:
+            raise RuntimeError("baseline must not live in workspace .codex state")
 
         # Allowed tracked modification passes.
         (root / "allowed.txt").write_text("changed\n", encoding="utf-8")
@@ -129,6 +140,13 @@ def main() -> int:
             raise RuntimeError("rename target was not detected")
         os.rename(root / "renamed.txt", root / "allowed.txt")
 
+        # Case-only rename must be visible on case-sensitive CI filesystems.
+        os.rename(root / "allowed.txt", root / "ALLOWED.txt")
+        out = run_tool(GUARD, "verify-write-set", "--contract", str(contract_path), cwd=root, expect=3)
+        if "ALLOWED.txt" not in out.stdout:
+            raise RuntimeError("case-only rename target was not detected")
+        os.rename(root / "ALLOWED.txt", root / "allowed.txt")
+
         if hasattr(os, "symlink"):
             try:
                 os.symlink("allowed.txt", root / "link.txt")
@@ -153,7 +171,7 @@ def main() -> int:
 
         # Baseline creation refuses a stale base_revision.
         stale_path = state / "STALE.contract.json"
-        stale = write_contract(stale_path, "0" * 40, task_id="STALE")
+        write_contract(stale_path, "0" * 40, task_id="STALE")
         run_tool(LOCK, "acquire", "--task-id", "STALE", cwd=root)
         out = run_tool(GUARD, "create-task-baseline", "--contract", str(stale_path), cwd=root, expect=2)
         if "does not match HEAD" not in out.stderr:
