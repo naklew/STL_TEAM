@@ -1,1 +1,30 @@
-{"$schema":"https://json-schema.org/draft/2020-12/schema","$id":"https://github.com/naklew/STL_TEAM/schemas/task-contract.schema.json","title":"SLT Task Contract v0.3.0","type":"object","additionalProperties":true,"required":["id","policy_version","agent_bundle_version","base_revision","contract_hash","goal","context","read_scope","allowed_files","forbidden_files","shared_or_generated_files","acceptance_criteria","verification","integration_verification","dependencies","execution","decision_gate","review_risk","escalation_conditions"],"properties":{"id":{"type":"string","minLength":1},"policy_version":{"const":"0.3.0"},"agent_bundle_version":{"const":"0.3.0"},"base_revision":{"type":"string","minLength":1},"contract_hash":{"type":"string","pattern":"^sha256:[0-9a-f]{64}$"},"goal":{"type":"string","minLength":1},"context":{"type":"array","items":{"type":"string"}},"read_scope":{"type":"array","items":{"type":"string"}},"allowed_files":{"type":"array","items":{"type":"string","minLength":1}},"forbidden_files":{"type":"array","items":{"type":"string","minLength":1}},"shared_or_generated_files":{"type":"array","items":{"type":"string","minLength":1}},"acceptance_criteria":{"type":"array","items":{"type":"string"}},"verification":{"type":"array","items":{"type":"string"}},"integration_verification":{"type":"array","items":{"type":"string"}},"dependencies":{"type":"array","items":{"type":"string"}},"execution":{"type":"object","additionalProperties":false,"required":["task_class"],"properties":{"task_class":{"enum":["trivial","bounded","complex_decided"]},"bounded_reasoning":{"enum":["mechanical","logic"]}}},"decision_gate":{"type":"object"},"review_risk":{"type":"object"},"escalation_conditions":{"type":"array","items":{"type":"string"}}}}
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/naklew/STL_TEAM/schemas/task-contract.schema.json",
+  "title": "SLT Task Contract v0.4.0",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["id","policy_version","agent_bundle_version","base_revision","contract_hash","goal","context","read_scope","allowed_files","forbidden_files","shared_or_generated_files","snapshot_exclude","acceptance_criteria","verification","integration_verification","dependencies","execution","decision_gate","review_risk","escalation_conditions"],
+  "properties": {
+    "id":{"type":"string","minLength":1},
+    "policy_version":{"const":"0.4.0"},
+    "agent_bundle_version":{"const":"0.4.0"},
+    "base_revision":{"type":"string","minLength":1},
+    "contract_hash":{"type":"string","pattern":"^sha256:[0-9a-f]{64}$"},
+    "goal":{"type":"string","minLength":1},
+    "context":{"type":"array","items":{"type":"string"}},
+    "read_scope":{"type":"array","items":{"type":"string","minLength":1}},
+    "allowed_files":{"type":"array","items":{"type":"string","minLength":1}},
+    "forbidden_files":{"type":"array","items":{"type":"string","minLength":1}},
+    "shared_or_generated_files":{"type":"array","items":{"type":"string","minLength":1}},
+    "snapshot_exclude":{"type":"array","items":{"type":"string","minLength":1}},
+    "acceptance_criteria":{"type":"array","items":{"type":"string"}},
+    "verification":{"type":"array","items":{"type":"string"}},
+    "integration_verification":{"type":"array","items":{"type":"string"}},
+    "dependencies":{"type":"array","items":{"type":"string"}},
+    "execution":{"type":"object","additionalProperties":false,"required":["task_class"],"properties":{"task_class":{"enum":["trivial","bounded","complex_decided"]},"bounded_reasoning":{"enum":["mechanical","logic"]}}},
+    "decision_gate":{"$ref":"routing-classification.schema.json#/properties/decision_gate"},
+    "review_risk":{"$ref":"routing-classification.schema.json#/properties/review_risk"},
+    "escalation_conditions":{"type":"array","items":{"type":"string"}}
+  }
+}
