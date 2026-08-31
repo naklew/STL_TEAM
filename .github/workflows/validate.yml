@@ -1,0 +1,25 @@
+name: validate-slt
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Compile Python tools
+        run: python -m py_compile scripts/*.py
+      - name: Validate repository package
+        run: python scripts/validate_repo.py
+      - name: Run routing policy eval
+        run: python scripts/run_policy_eval.py
+      - name: Run contract guard eval
+        run: python scripts/run_guard_eval.py
