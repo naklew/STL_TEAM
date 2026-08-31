@@ -1,0 +1,37 @@
+{
+  "name": "sol-luna-team",
+  "version": "0.2.0",
+  "description": "Cost-aware Codex team with Terra parent orchestration, bounded Luna implementation, and risk-gated Sol architecture/review.",
+  "author": {
+    "name": "SLT Team contributors"
+  },
+  "license": "MIT",
+  "keywords": [
+    "codex",
+    "multi-agent",
+    "coding",
+    "orchestration",
+    "cost-aware"
+  ],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "SLT Hybrid Cost-Aware Team",
+    "shortDescription": "Terra leads, Luna executes bounded work, Sol gates risky decisions.",
+    "longDescription": "Use Terra High as the parent for reconnaissance, integration, and verification. Route narrow work to Luna Max, already-decided complex implementation to Terra High, and only material design or high-risk review decisions to Sol High.",
+    "developerName": "SLT Team contributors",
+    "category": "Developer Tools",
+    "capabilities": [
+      "Risk-gated model routing",
+      "Bounded implementation contracts",
+      "Context packets for Sol",
+      "Single-writer safety",
+      "Verification and review"
+    ],
+    "brandColor": "#7C3AED",
+    "defaultPrompt": [
+      "Use $sol-luna-team to implement this change with risk-gated Sol usage.",
+      "Use $sol-luna-team to debug this issue and escalate only material decisions to Sol.",
+      "Use $sol-luna-team to verify and review this change cost-efficiently."
+    ]
+  }
+}
