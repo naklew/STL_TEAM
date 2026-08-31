@@ -136,6 +136,12 @@ Set a `review_risk` flag when the actual implementation materially touches:
 - material generated/shared release artifacts;
 - repeated/flaky failure evidence.
 
+The exact v0.4 review-risk keys include `security_boundary_touched`,
+`data_integrity_or_loss_risk`, `domain_critical_logic_touched`,
+`deployment_or_runtime_safety_touched`, and `resource_exhaustion_or_capacity_risk`.
+Material public-contract, dependency/protocol, and generated/shared-artifact risks use their
+corresponding `*_material*` keys from `policy_defs.py`.
+
 Materiality matters. Cosmetic public labels, routine lockfile churn, or benign generated snapshots
 are not review triggers merely because a file changed. Set the corresponding `*_material*` flag
 only when semantics, compatibility, release behavior, or meaningful risk changes.
