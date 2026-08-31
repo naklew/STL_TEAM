@@ -4,7 +4,7 @@
 v0.4.0 improvements:
 - tracked, non-ignored untracked, and ignored untracked files are snapshotted;
 - explicit snapshot_exclude patterns are visible in the contract;
-- baselines live in the Git worktree's private gitdir, outside the normal workspace;
+- baselines live in an external per-worktree SLT state directory outside the workspace;
 - base_revision must match HEAD when the baseline is created;
 - HEAD and contract hash must remain unchanged through verification;
 - a matching worktree-scoped writer lock is required.
@@ -216,8 +216,21 @@ def safe_task_id(task_id: str) -> str:
     return "".join(c if c.isalnum() or c in "-_." else "_" for c in task_id)
 
 
+def external_state_root(root: Path) -> Path:
+    configured = os.environ.get("SLT_STATE_HOME")
+    base = Path(configured).expanduser() if configured else Path.home() / ".codex" / "slt-state"
+    identity = hashlib.sha256(str(root.resolve()).encode("utf-8", errors="surrogateescape")).hexdigest()[:24]
+    path = (base / "baselines" / identity).resolve()
+    path.mkdir(parents=True, exist_ok=True)
+    try:
+        os.chmod(path, 0o700)
+    except OSError:
+        pass
+    return path
+
+
 def default_baseline_path(root: Path, task_id: str) -> Path:
-    return git_path(root, f"slt-baselines/{safe_task_id(task_id)}.baseline.json")
+    return external_state_root(root) / f"{safe_task_id(task_id)}.baseline.json"
 
 
 def writer_lock(root: Path) -> dict[str, Any] | None:
