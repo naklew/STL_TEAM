@@ -9,14 +9,18 @@ permissions:
 
 jobs:
   validate:
-    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
       - name: Compile Python tools
-        run: python -m py_compile scripts/*.py
+        run: python -m compileall -q scripts
       - name: Validate repository package
         run: python scripts/validate_repo.py
       - name: Run routing policy eval
