@@ -1,25 +1,27 @@
 ---
 name: sol-luna-team
-description: "SLT Hybrid v0.3.0: Terra High parent orchestration with versioned task contracts, deterministic post-classification routing/write-set guards, Luna High/Max bounded workers, and Sol High only for unresolved decisions or actual review risk."
+description: "SLT Hybrid v0.4.0: Terra High parent orchestration with versioned named agents, structured semantic classification, deterministic post-classification routing, worktree-safe setup, protected baselines, ignored-file write-set checks, and worktree-scoped single-writer locking."
 ---
 
-# SLT Hybrid v0.3.0
+# SLT Hybrid v0.4.0
 
 Use this skill for authorized implementation, debugging, refactoring, and test work when Sol-level
 judgment is valuable but Sol should not spend tokens on routine exploration and coding.
 
 ## Objective and honesty boundary
 
-Optimize for **Sol tokens + rework**, not minimum total tokens.
+Optimize for **Sol tokens + avoidable rework**, not minimum total tokens.
 
-This package has two different kinds of control:
+This package separates semantic judgment from machine enforcement:
 
 1. **Semantic classification remains model/user judgment.** Terra evaluates evidence and marks
-   `decision_gate`, `review_risk`, and execution class.
-2. **After those values are supplied, routing, contract hashing/version checks, baseline capture,
-   and write-set verification are deterministic scripts.**
+   `decision_gate`, `review_risk`, execution class, and any explicit snapshot exclusions.
+2. **After classification, routing, version checks, contract hashing, base-revision checks, writer
+   locking, baseline capture, and write-set verification are deterministic scripts.**
 
-Do not describe the semantic classifier as code-enforced or fully deterministic.
+Do not describe the semantic classifier as code-enforced or fully deterministic. The package is a
+policy-guided orchestrator with deterministic guards around the parts that can be mechanically
+verified.
 
 ## Required parent and bundle preflight
 
@@ -30,20 +32,32 @@ Recommended parent session:
 The skill cannot switch the parent model. If the current parent is not known to be Terra High,
 state that limitation before non-trivial delegation.
 
-Before spawning named workers, verify the project contains:
-- `.codex/slt-team.json`
+Before spawning named workers, run the package readiness check from the checked-out SLT source:
+
+```bash
+python scripts/slt_setup.py status <target-project>
+```
+
+The command must return success. It verifies:
+- `policy_version`, `agent_bundle_version`, and plugin bundle version alignment;
+- hashes of managed named-agent and SLT tool files;
+- project `.codex/config.toml` agent settings;
+- worktree-safe Git `info/exclude` configuration.
+
+The target project must contain these managed tools/agents after setup:
 - `.codex/agents/luna-fast.toml`
 - `.codex/agents/luna-worker.toml`
 - `.codex/agents/terra-worker.toml`
 - `.codex/agents/sol-architect.toml`
 - `.codex/agents/sol-reviewer.toml`
-- `.codex/slt-tools/contract_guard.py`
+- `.codex/slt-tools/policy_defs.py`
 - `.codex/slt-tools/routing_policy.py`
+- `.codex/slt-tools/contract_guard.py`
+- `.codex/slt-tools/writer_lock.py`
 
-The manifest must report `policy_version = 0.3.0` and `agent_bundle_version = 0.3.0`.
-If the bundle is missing or stale, do not silently delegate with guessed models. Ask the user to
-install/update the bundle with `scripts/slt_setup.py` from this repository, or continue only in an
-explicit single-parent safe mode.
+The manifest must report `policy_version = 0.4.0` and `agent_bundle_version = 0.4.0`.
+If status fails, do not silently delegate with guessed/stale models. Update the bundle or continue
+only in an explicit single-parent safe mode.
 
 Do not use a child orchestrator. The Terra parent follows this skill directly.
 Never invoke Sol Max automatically. Sol Max requires an unresolved high-impact decision after
@@ -58,7 +72,7 @@ Sol High plus explicit user approval.
 | Logic-heavy bounded implementation | `luna_worker` | Luna Max |
 | Complex but already-decided multi-file implementation | `terra_worker` | Terra High |
 | Unresolved material decision gate | `sol_architect` | Sol High |
-| Final high-risk review | `sol_reviewer` | Sol High |
+| Final material-risk review | `sol_reviewer` | Sol High |
 
 ## 1. Trivial fast path
 
@@ -67,53 +81,64 @@ of the following hold:
 - at most one or two narrowly scoped files are expected;
 - acceptance criteria are explicit;
 - no unresolved decision-gate flag is true;
-- no review-risk domain is expected to be touched;
-- no new dependency, migration, generated/shared artifact, or public contract is involved;
+- no material review-risk domain is expected to be touched;
+- no new dependency, migration, generated/shared release artifact, security boundary, domain-
+  critical logic, deployment/runtime safety, or public contract is involved;
 - verification is obvious and local.
 
-After the direct edit, inspect the diff and run the relevant verification. If the task stops being
+After the direct edit, inspect the diff and run relevant verification. If the task stops being
 trivial, enter the normal workflow instead of stretching the fast path.
 
 ## 2. Reconnaissance and semantic classification
 
 Terra inspects repository instructions, current diff, relevant modules/contracts/tests,
-shared/generated artifacts, and verification commands. Preserve pre-existing user changes.
-Record observed facts with file/symbol or command evidence.
+shared/generated artifacts, ignored-but-material local files, and verification commands. Preserve
+pre-existing user changes and record observed facts with file/symbol or command evidence.
 
-For non-trivial work create a routing classification JSON under `.codex/slt-state/` with:
+Create a routing classification JSON under `.codex/slt-state/`. The exact flag names are defined
+in `.codex/slt-tools/policy_defs.py` and validated by `routing_policy.py`.
 
-```json
-{
-  "policy_version": "0.3.0",
-  "decision_gate": {
-    "unresolved_architecture": false,
-    "ambiguous_requirement": false,
-    "competing_root_causes": false,
-    "contract_expansion_required": false,
-    "unresolved_security_policy": false,
-    "external_contract_unknown": false,
-    "migration_strategy_unresolved": false,
-    "concurrency_semantics_unresolved": false,
-    "irreversible_operation_unresolved": false,
-    "repeated_failure": false
-  },
-  "review_risk": {
-    "public_contract_touched": false,
-    "schema_or_migration_touched": false,
-    "auth_or_permission_touched": false,
-    "concurrency_or_transaction_touched": false,
-    "irreversible_operation_touched": false,
-    "new_dependency_or_protocol_touched": false,
-    "weak_test_oracle": false,
-    "generated_or_shared_artifact_touched": false,
-    "repeated_failure_or_flaky": false
-  },
-  "execution": {
-    "task_class": "bounded",
-    "bounded_reasoning": "mechanical"
-  }
-}
-```
+### Decision-gate concepts
+
+Set a `decision_gate` flag when a material question is unresolved, including:
+- architecture or acceptance criteria;
+- competing root causes;
+- contract expansion;
+- security/auth policy or broader security/trust-boundary semantics;
+- external contract compatibility;
+- migration strategy;
+- data-integrity/loss semantics;
+- project-defined domain-critical behavior;
+- concurrency/transaction/idempotency/ordering semantics;
+- deployment/runtime safety;
+- resource/capacity semantics;
+- irreversible/destructive behavior;
+- repeated failure.
+
+Any true decision flag requires `sol_architect` before implementation continues.
+
+### Review-risk concepts and materiality
+
+Set a `review_risk` flag when the actual implementation materially touches:
+- a public contract/API compatibility boundary;
+- schema/migration behavior;
+- auth/permission behavior;
+- a security/trust boundary, secret handling, deserialization, SSRF/network trust, cryptography,
+  or other sensitive input/data-flow boundary;
+- data integrity or data-loss risk;
+- project-specific financial, numerical, safety, or other domain-critical algorithms;
+- concurrency/transaction behavior;
+- irreversible operations;
+- a materially new/changed dependency or protocol;
+- deployment/runtime safety;
+- resource exhaustion or capacity safety;
+- weak test oracles;
+- material generated/shared release artifacts;
+- repeated/flaky failure evidence.
+
+Materiality matters. Cosmetic public labels, routine lockfile churn, or benign generated snapshots
+are not review triggers merely because a file changed. Set the corresponding `*_material*` flag
+only when semantics, compatibility, release behavior, or meaningful risk changes.
 
 Run:
 
@@ -121,72 +146,71 @@ Run:
 python .codex/slt-tools/routing_policy.py --input <classification.json>
 ```
 
-The script deterministically maps the supplied flags to named agents. Terra must not override the
-script merely to save tokens.
+The script deterministically maps supplied flags/execution class to named agents. Terra must not
+override the result merely to save tokens.
 
 Product choices, business approvals, and missing user preferences belong to the user, not Sol.
 
-## 3. Decision gate and review risk are different
+## 3. Decision gate and review risk are deliberately separate
 
-### `decision_gate`
+`decision_gate` asks: **Is there an unresolved material decision that blocks safe implementation?**
 
-This asks whether **an unresolved material decision blocks safe implementation**.
-Any true flag requires `sol_architect` before implementation continues.
-
-Typical reasons:
-- architecture or acceptance criteria are unresolved;
-- plausible root causes imply materially different fixes;
-- security/auth policy itself is unresolved;
-- external contract or compatibility expectations are unknown;
-- migration, concurrency, transaction, idempotency, locking, ordering, or destructive semantics
-  are unresolved;
-- implementation needs contract expansion;
-- a bounded task repeatedly fails.
-
-### `review_risk`
-
-This asks whether **the actual implementation touches a domain that deserves Sol final review**,
-even if its design was already approved.
-
-Examples:
-- public API/contract touched;
-- schema or migration touched;
-- auth/permission behavior touched;
-- concurrency/transaction behavior touched;
-- irreversible operation touched;
-- dependency/protocol changed;
-- test oracle is weak;
-- shared/generated artifacts changed;
-- repeated failure or flaky behavior remains relevant.
+`review_risk` asks: **Did the integrated implementation materially touch a domain that deserves
+Sol final review even when design was already approved?**
 
 A frozen auth implementation can therefore skip Sol Architect but still require Sol Reviewer.
-This separation is intentional to avoid duplicate Sol calls.
+This separation exists to reduce duplicate Sol calls.
 
 ## 4. Sol context packet
 
-When crossing either Sol gate, use `references/context-packet.md` version 0.3.0.
+When crossing either Sol gate, use `references/context-packet.md` v0.4.0.
 
-Do not give Sol only a prose summary and do not dump the repository. Start with:
-- original requirement and base revision;
+Start with:
+- original requirement and exact base revision;
 - evidence-backed observed facts;
 - invariants and unresolved questions;
 - exact decision/review flags;
 - relevant paths/symbols and why they matter;
-- active contract ids and hashes;
+- active contract ids/hashes and snapshot exclusions;
 - relevant patch;
+- writer-lock/write-set status;
 - exact verification evidence.
 
-Sol should directly read targeted surrounding symbols/contracts/tests when needed.
-Prefer the same Sol thread for final review when the client safely supports reuse. Otherwise send
-a complete versioned packet. Do not duplicate full patch plus full files by default.
+Sol should directly read targeted surrounding symbols/contracts/tests when needed. Prefer reuse of
+the earlier Sol thread when the client safely supports it. Otherwise send a complete versioned
+packet. Do not duplicate full patch plus full files by default.
 
-## 5. Machine-verifiable task contracts
+## 5. Machine-verifiable writer contract
 
 Every delegated writer requires a JSON contract based on `references/task-contract.md`.
-The contract is immutable after hashing/baseline creation. If the boundary or decision changes,
-create a revised contract and a new baseline; do not silently edit the old one.
 
-Required sequence before spawn:
+The contract includes:
+- exact `base_revision` equal to current HEAD;
+- immutable `contract_hash`;
+- read/allowed/forbidden scopes;
+- declared shared/generated files;
+- explicit `snapshot_exclude` patterns;
+- verification/integration commands;
+- decision and review-risk classifications;
+- escalation conditions.
+
+`snapshot_exclude` exists only for explicitly accepted performance exclusions such as huge
+throwaway dependency/cache trees. Excluded paths are not protected. Never silently exclude
+secrets, material local configuration, migrations, or release artifacts.
+
+## 6. Single-writer lock and protected baseline
+
+For delegated writes in a shared worktree, acquire the lock first:
+
+```bash
+python .codex/slt-tools/writer_lock.py acquire --task-id <TASK-ID>
+```
+
+The lock lives in the current Git worktree's private gitdir. A second writer in the same worktree
+fails to acquire it. Separate Git worktrees have separate locks and may be used for intentional
+parallel writers.
+
+Then run:
 
 ```bash
 python .codex/slt-tools/contract_guard.py hash-contract --contract <contract.json> --write
@@ -194,63 +218,78 @@ python .codex/slt-tools/contract_guard.py validate-task-contract --contract <con
 python .codex/slt-tools/contract_guard.py create-task-baseline --contract <contract.json>
 ```
 
-A contract includes version fields, base revision, read scope, allowed/forbidden files,
-shared/generated artifacts, acceptance criteria, scoped/integration verification, execution class,
-decision flags, review-risk prediction, and escalation conditions.
+Baseline creation requires the matching writer lock and rejects stale `base_revision` values.
+The baseline is stored outside the normal workspace under the current worktree's Git metadata,
+which reduces accidental worker tampering. The worker does not need the baseline path.
 
-`allowed_files` is not a sandbox ACL. The guard detects violations after execution.
+## 7. Implementation routing
 
-## 6. Implementation routing
-
-Use the routing script result.
+Use the routing-script result.
 
 ### `luna_fast` — Luna High
-Use only for mechanical bounded edits with frozen behavior and objective verification.
-Examples: explicit mappings, fixtures, narrow repetitive tests, simple configuration/text changes.
+Mechanical bounded edits with frozen behavior and objective verification.
 
 ### `luna_worker` — Luna Max
-Use for bounded implementation that needs local logic reasoning but no material design decision.
+Bounded implementation needing local logic reasoning but no material design decision.
 
 ### `terra_worker` — Terra High
-Use for complex/multi-file but already-decided implementation, integration-aware repair, or focused
+Complex/multi-file but already-decided implementation, integration-aware repair, or focused
 debugging with a defined expected outcome.
 
 If a worker discovers an unresolved decision, contract expansion, or repeated/non-deterministic
 failure, stop and reclassify rather than guessing.
 
-## 7. Deterministic write-set check
+## 8. Write-set verification
 
-After every delegated writer and before accepting its result, run:
+After every delegated writer and before accepting its result:
 
 ```bash
 python .codex/slt-tools/contract_guard.py verify-write-set --contract <contract.json>
 ```
 
-Exit code 0 means the changed paths fit the contract. A non-zero result is a failed task boundary.
-Do not silently bless an undeclared write by editing `allowed_files` after the fact. Investigate,
-revert/repair as appropriate, and issue a revised contract only after the broader scope is approved.
+The guard compares against the protected baseline and includes:
+- tracked files;
+- non-ignored untracked files;
+- ignored untracked files, including pre-existing ignored files whose contents changed;
+- deletions, binary content changes, renames as path changes, and symlink changes where supported.
 
-The baseline is a path-by-path content snapshot, so pre-existing dirty tracked/untracked files are
-preserved rather than assumed clean.
+It rejects:
+- stale/changed HEAD;
+- contract/hash mismatch against the baseline;
+- forbidden paths;
+- undeclared paths.
 
-## 8. Parallelism
+`allowed_files` remains a post-write contract guard, not a pre-write sandbox ACL. A malicious or
+non-cooperative process with broader filesystem permissions is outside this tool's guarantee.
 
-The bundled project config permits at most two child threads. Within a shared workspace:
-- default to **one active writer**;
-- a second writer is allowed only for genuinely independent files and generated/shared artifacts;
-- prefer separate worktrees for write-heavy concurrency;
-- serialize lockfiles, migrations, generated code, snapshots, broad formatters, mutable full
-  builds/tests, shared dev servers, and shared databases;
-- read-only reconnaissance/triage may use the available second child when useful.
+After the parent accepts the guarded write set, release the lock:
 
-The concurrency limit is not a writer semaphore; the parent must still enforce single-writer policy.
+```bash
+python .codex/slt-tools/writer_lock.py release --task-id <TASK-ID>
+```
 
-## 9. Integration and final review routing
+Do not silently bless an undeclared write by editing the old contract after the fact. Investigate,
+revert/repair as appropriate, then issue an explicitly revised contract and new baseline.
 
-Terra integrates the result, checks complete diff versus baseline/contracts, runs scoped then
-integration verification, and records any new risks.
+## 9. Parallelism
 
-Do **not** mutate hashed task contracts merely to update final review risk. Create a final routing
+The project config permits at most two child threads, but this is not a writer semaphore.
+`writer_lock.py` is the same-worktree writer semaphore.
+
+Rules:
+- one active writer per shared worktree;
+- for parallel writers, use separate Git worktrees and separate task contracts/baselines;
+- serialize shared external resources: databases, dev servers, migrations, lockfiles, generated
+  release artifacts, broad formatters, and mutable full builds/tests even across worktrees when
+  those resources are shared;
+- read-only reconnaissance/triage may use the second child when useful.
+
+## 10. Integration and final review routing
+
+Terra integrates the result, checks complete diff versus contracts, runs scoped then integration
+verification, and records any new risks.
+
+Do **not** mutate a hashed task contract merely to update final review risk. Create a final routing
 classification from the actual integrated diff and verification evidence, then run
 `routing_policy.py` again.
 
@@ -260,16 +299,17 @@ Sol review. Task size alone is not a review trigger.
 For blocker/important review findings, create a bounded repair. Reinvoke Sol only when the repair
 changes material assumptions or the final review-risk classification still requires it.
 
-## 10. Completion handoff
+## 11. Completion handoff
 
 Report:
 - semantic classification and routing-script result;
 - Sol calls made and why;
 - named worker allocation;
-- contract ids/hashes;
+- contract ids/hashes and snapshot exclusions;
+- writer-lock and protected-baseline status;
 - deterministic write-set results;
 - exact verification commands/results;
-- final review-risk classification and review result;
+- final material review-risk classification and review result;
 - unresolved risks or environment limitations.
 
 A prose claim such as `looks good` is not verification evidence.
