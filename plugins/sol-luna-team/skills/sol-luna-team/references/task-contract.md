@@ -1,8 +1,8 @@
 # Machine-verifiable task contract v0.4.0
 
-SLT 0.4.0 uses JSON for delegated writer contracts. Runtime contract files live under
-`.codex/slt-state/`, while the protected baseline is stored outside the worktree in the current
-Git worktree's private gitdir.
+SLT uses JSON contracts for delegated writers. Runtime contracts, locks, and default baseline files live under the target worktree's `.codex/slt-state/`, which is writable under normal Codex `workspace-write`.
+
+Baseline integrity is **not** based on hiding that file from the worker. `create-task-baseline` returns a SHA-256 seal that the parent retains and supplies only during final verification. If the baseline bytes are changed, verification fails before the baseline is trusted.
 
 ## Contract shape
 
@@ -69,76 +69,80 @@ Git worktree's private gitdir.
 }
 ```
 
-This intentionally demonstrates the split: auth behavior is touched, so Sol Reviewer is required,
-but the auth/security policy is already resolved, so Sol Architect is not required.
+This example intentionally separates review risk from an unresolved decision: auth behavior is touched, so Sol Reviewer is required, while the already-approved auth policy does not require Sol Architect.
 
 ## `snapshot_exclude`
 
-The guard now includes tracked files, non-ignored untracked files, and ignored untracked files.
-If a repository has huge disposable trees such as `node_modules/**` or `.venv/**`, they may be
-listed in `snapshot_exclude` for performance. Every exclusion is therefore explicit and becomes
-part of the immutable contract hash. Excluded paths are **not protected by write-set verification**.
-Do not exclude secrets, runtime configuration, generated release artifacts, migrations, or other
-files whose mutation matters to the task.
+The guard snapshots tracked files, non-ignored untracked files, and ignored untracked files. Huge disposable trees such as `node_modules/**` or `.venv/**` may be explicitly listed in `snapshot_exclude` for performance.
+
+Every exclusion becomes part of the immutable contract hash. Excluded paths are **not protected by write-set verification**. Do not exclude secrets, material runtime configuration, migrations, generated release artifacts, or other paths whose mutation matters.
 
 ## Required command sequence
 
-Acquire the worktree writer lock before baseline creation:
+Acquire the worktree-local writer lock:
 
 ```bash
 python .codex/slt-tools/writer_lock.py acquire --task-id AUTH-003
 ```
 
-Then hash, validate, and snapshot:
+Then hash, validate, and create the baseline:
 
 ```bash
 python .codex/slt-tools/contract_guard.py hash-contract \
   --contract .codex/slt-state/AUTH-003.contract.json --write
+
 python .codex/slt-tools/contract_guard.py validate-task-contract \
   --contract .codex/slt-state/AUTH-003.contract.json
+
 python .codex/slt-tools/contract_guard.py create-task-baseline \
-  --contract .codex/slt-state/AUTH-003.contract.json
+  --contract .codex/slt-state/AUTH-003.contract.json --json
 ```
 
-`create-task-baseline` refuses to run if:
-- the writer lock is absent or belongs to another task;
-- `base_revision` does not equal the current HEAD;
-- the contract/hash/version is invalid.
+The final command returns data like:
 
-The baseline is stored under Git metadata (`git rev-parse --git-path slt-baselines/...`), not in the
-normal workspace. The worker does not need its path.
+```json
+{
+  "baseline": "<worktree>/.codex/slt-state/baselines/AUTH-003.baseline.json",
+  "baseline_sha256": "sha256:<64 hex chars>"
+}
+```
 
-After the writer returns:
+The **parent retains `baseline_sha256` and does not give the seal to the writer**. The baseline file itself is workspace-local so that ordinary Codex `workspace-write` can create it. It is tamper-evident rather than filesystem-inaccessible.
+
+`create-task-baseline` refuses to run if the matching writer lock is absent, `base_revision` differs from current HEAD, or the contract/hash/version is invalid.
+
+After the writer returns, the parent runs:
 
 ```bash
 python .codex/slt-tools/contract_guard.py verify-write-set \
-  --contract .codex/slt-state/AUTH-003.contract.json
+  --contract .codex/slt-state/AUTH-003.contract.json \
+  --baseline-sha sha256:<parent-held seal>
 ```
 
 Verification rejects:
-- contract/hash tampering relative to the protected baseline;
+- baseline-byte changes relative to the parent-held seal;
+- contract/hash tampering relative to the sealed baseline;
 - HEAD changes after baseline creation;
 - forbidden or undeclared changed paths;
-- tracked, non-ignored untracked, and ignored-file mutations outside the declared boundary.
+- tracked, normal-untracked, and ignored-file mutations outside the declared boundary;
+- case-only rename targets such as `foo.txt -> FOO.txt`, including on Windows case-insensitive worktrees.
 
-Release the lock only after the parent has accepted the write-set result:
+Release the lock only after the parent accepts verification:
 
 ```bash
 python .codex/slt-tools/writer_lock.py release --task-id AUTH-003
 ```
 
-A non-zero guard result is a failed contract. Never silently expand `allowed_files` after a
-violation. Investigate/revert as appropriate, create an explicitly revised contract, acquire the
-lock, rehash, and create a fresh baseline.
+A non-zero guard result is a failed contract. Do not silently expand `allowed_files`; investigate/revert as appropriate and create an explicitly revised contract and fresh baseline.
+
+## Safety boundary
+
+This is a machine-verifiable **cooperative post-write guard**, not a pre-write filesystem ACL and not a cryptographic security boundary against a malicious process that can read or alter the parent context. The parent-held seal protects against baseline mutation by an ordinary delegated writer that is not given the seal.
 
 ## Decision gate versus review risk
 
-`decision_gate` means **an unresolved material decision blocks safe implementation**.
+`decision_gate` means an unresolved material decision blocks safe implementation.
 
-`review_risk` means **the integrated implementation materially touches a domain deserving Sol
-review even when the design was already approved**.
+`review_risk` means the integrated implementation materially touches a domain deserving Sol review even when design was already approved.
 
-Materiality is intentional. A cosmetic public label, routine lockfile churn, or benign generated
-snapshot should not set `public_contract_material_change`, `new_dependency_or_protocol_material`,
-or `generated_or_shared_artifact_material` unless it changes semantics, compatibility, release
-behavior, or risk.
+Materiality is intentional. Cosmetic public labels, routine lockfile churn, or benign generated snapshots should not set the corresponding `*_material*` flags unless semantics, compatibility, release behavior, or meaningful risk changes.
