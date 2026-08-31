@@ -1,8 +1,7 @@
-# Example only. Prefer the project-scoped template at:
-# templates/project/.codex/config.toml
+# Example only. Prefer installing the project-scoped bundle with:
+#   python scripts/slt_setup.py install /path/to/project
 #
-# Do not set default_subagent_model to Luna globally. Named agents should make
-# Luna/Terra/Sol routing explicit.
+# Do not set default_subagent_model. Named agents keep Luna/Terra/Sol routing explicit.
 
 [agents]
 enabled = true

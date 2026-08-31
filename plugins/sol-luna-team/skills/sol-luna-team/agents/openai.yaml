@@ -1,7 +1,7 @@
 interface:
-  display_name: "SLT Hybrid · Cost Aware"
-  short_description: "Terra leads; objective risk gates call Sol; Luna handles bounded work."
+  display_name: "SLT Hybrid v0.3 · Cost Aware"
+  short_description: "Terra leads; task guards constrain workers; Sol handles unresolved decisions and risky review."
   brand_color: "#7C3AED"
-  default_prompt: "Use $sol-luna-team with a Terra High parent. Apply objective risk flags before implementation, call Sol High only for mandatory decision/review gates, and use named Luna/Terra workers for execution."
+  default_prompt: "Use $sol-luna-team v0.3.0 with a Terra High parent. Classify decision and review risk separately, use the deterministic routing/task guards, and reserve Sol High for required gates."
 policy:
   allow_implicit_invocation: false

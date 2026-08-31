@@ -1,37 +1,30 @@
 {
   "name": "sol-luna-team",
-  "version": "0.2.0",
-  "description": "Cost-aware Codex team with Terra parent orchestration, bounded Luna implementation, and risk-gated Sol architecture/review.",
-  "author": {
-    "name": "SLT Team contributors"
-  },
+  "version": "0.3.0",
+  "description": "Hybrid cost-aware Codex team with Terra parent orchestration, machine-verifiable task boundaries, bounded Luna workers, and separate Sol decision/review gates.",
+  "author": {"name": "SLT Team contributors"},
   "license": "MIT",
-  "keywords": [
-    "codex",
-    "multi-agent",
-    "coding",
-    "orchestration",
-    "cost-aware"
-  ],
+  "keywords": ["codex", "multi-agent", "coding", "orchestration", "cost-aware", "verification"],
   "skills": "./skills/",
   "interface": {
     "displayName": "SLT Hybrid Cost-Aware Team",
-    "shortDescription": "Terra leads, Luna executes bounded work, Sol gates risky decisions.",
-    "longDescription": "Use Terra High as the parent for reconnaissance, integration, and verification. Route narrow work to Luna Max, already-decided complex implementation to Terra High, and only material design or high-risk review decisions to Sol High.",
+    "shortDescription": "Terra leads; deterministic guards bound workers; Sol handles unresolved decisions and risky review.",
+    "longDescription": "Use Terra High as the parent, Luna High/Max for bounded execution, Terra High for already-decided complex work, and Sol High only for unresolved material decisions or final risk review. Task hashes, version checks, baseline snapshots, write-set verification, setup/status tooling, and routing evals reduce orchestration drift.",
     "developerName": "SLT Team contributors",
     "category": "Developer Tools",
     "capabilities": [
-      "Risk-gated model routing",
-      "Bounded implementation contracts",
-      "Context packets for Sol",
-      "Single-writer safety",
-      "Verification and review"
+      "Separate decision and review gates",
+      "Versioned named custom agents",
+      "Machine-verifiable task contracts",
+      "Deterministic write-set verification",
+      "Routing policy evals",
+      "Cost-aware model routing"
     ],
     "brandColor": "#7C3AED",
     "defaultPrompt": [
-      "Use $sol-luna-team to implement this change with risk-gated Sol usage.",
-      "Use $sol-luna-team to debug this issue and escalate only material decisions to Sol.",
-      "Use $sol-luna-team to verify and review this change cost-efficiently."
+      "Use $sol-luna-team to implement this change with SLT v0.3.0 routing and deterministic task guards.",
+      "Use $sol-luna-team to debug this issue while reserving Sol for unresolved decisions or final review risk.",
+      "Use $sol-luna-team and verify every delegated write set before integration."
     ]
   }
 }

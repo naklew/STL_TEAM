@@ -1,34 +1,54 @@
-# SLT Hybrid v2 — Cost-Aware Codex Team
+# SLT Hybrid Cost-Aware Team v0.3.0
 
-Terra High를 부모 세션으로 사용하고, Luna Max는 좁고 검증 가능한 구현에, Sol High는 객관적 risk gate와 고위험 최종 리뷰에만 사용하는 Codex 멀티에이전트 구성입니다.
+A Codex multi-agent orchestration package designed to preserve Sol-level judgment while reducing
+Sol usage on routine implementation.
 
-핵심 목표는 **Sol token usage + avoidable rework 최소화**입니다.
-
-자세한 한국어 설명은 [`README.DK.md`](README.DK.md)를 확인하세요.
-
-## 설치
-
-```bash
-codex plugin marketplace add naklew/STL_TEAM --ref hybrid-v2
-codex plugin add sol-luna-team@sol-luna-team
-```
-
-대상 프로젝트에는 `templates/project/.codex/` 내용을 복사하고 새 Terra High 세션에서 `$sol-luna-team`을 명시적으로 호출합니다.
-
-## Routing
+## Architecture
 
 ```text
 Terra High parent
-  ├─ objective risk classifier
-  │    └─ material risk → Sol Architect High
-  ├─ Luna Max → narrow bounded implementation
-  ├─ Terra High → already-decided multi-file implementation
-  ├─ Terra integration / verification
-  └─ risk-based Sol Reviewer High
+  -> semantic classification
+  -> deterministic routing policy
+     -> Sol Architect High only for unresolved material decisions
+     -> Luna High for mechanical bounded work
+     -> Luna Max for logic-heavy bounded work
+     -> Terra High for complex but already-decided work
+  -> deterministic write-set verification
+  -> Terra integration
+  -> final review-risk classification
+     -> Sol Reviewer High only when required
 ```
 
-Sol Max는 자동 사용하지 않습니다.
+The semantic classification itself is still model/user judgment. The repository makes the steps
+after classification deterministic: versioned routing, contract hashing, baseline snapshots,
+write-set checks, package validation, and scenario evals.
 
-## Origin
+## Install
 
-This repository is a cost-aware derivative of the MIT-licensed `newrise0410/SLT_Team` orchestration approach, with revised routing, risk gates, context packets, and project-scoped concurrency controls.
+```bash
+git clone https://github.com/naklew/STL_TEAM.git
+cd STL_TEAM
+codex plugin marketplace add naklew/STL_TEAM --ref main
+codex plugin add sol-luna-team@sol-luna-team
+python scripts/slt_setup.py install /path/to/target-project
+```
+
+Start a new Codex session on `gpt-5.6-terra` with `high` reasoning, then explicitly invoke
+`$sol-luna-team`.
+
+Check/update the project agent bundle:
+
+```bash
+python scripts/slt_setup.py status /path/to/target-project
+python scripts/slt_setup.py update /path/to/target-project
+```
+
+## Validation
+
+```bash
+python scripts/validate_repo.py
+python scripts/run_policy_eval.py
+python scripts/run_guard_eval.py
+```
+
+See [README.DK.md](README.DK.md) for the Korean guide and [INSTALL.txt](INSTALL.txt) for details.

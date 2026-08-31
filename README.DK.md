@@ -1,140 +1,143 @@
-# SLT Hybrid v2 — Cost-Aware Codex Team
+# SLT Hybrid Cost-Aware Team v0.3.0
 
-목표는 **Sol의 판단 품질을 중요한 지점에만 사용하면서 Sol 사용량과 재작업을 함께 줄이는 것**입니다.
+목표는 **Sol의 판단 품질을 필요한 지점에만 사용하고, 탐색·구현·검증 토큰은 Terra/Luna로 이동**하는 것입니다.
 
-이 버전은 원본 SLT의 plugin 패키징/Task Contract 장점과 Terra-parent 비용 라우팅을 결합합니다.
-
-## 권장 구조
-
-부모 Codex 세션:
+## 핵심 구조
 
 ```text
-gpt-5.6-terra
-reasoning: high
+Terra High Parent
+       │
+       ├─ trivial fast path -> Terra 직접 처리
+       │
+       └─ non-trivial
+             │
+          의미 분류
+             │
+      decision_gate / review_risk
+             │
+      deterministic routing script
+        ┌────┴───────────┐
+        │                │
+  unresolved decision?   │
+        │                │
+  Sol Architect High     │
+        │                │
+        └──── contract ──┘
+             │
+     contract hash + baseline
+             │
+   ┌─────────┼──────────┐
+   │         │          │
+Luna High  Luna Max  Terra High
+mechanical bounded   complex-decided
+   └─────────┼──────────┘
+             │
+      verify-write-set
+             │
+      Terra integration
+             │
+     final review_risk
+             │
+        risky? -> Sol Reviewer High
 ```
 
-흐름:
+## v0.3.0에서 바뀐 점
+
+### 1. Architecture gate와 Review risk 분리
+
+`decision_gate`는 **아직 해결되지 않은 설계 판단**만 Sol Architect로 보냅니다.
+`review_risk`는 **설계는 이미 확정됐지만 최종 결과를 Sol이 봐야 하는 고위험 변경**을 표시합니다.
+
+예를 들어 이미 정책이 확정된 인증 코드 수정은:
 
 ```text
-Terra High parent
-    │
-    ├─ reconnaissance / evidence index
-    ├─ objective risk flags
-    │      │
-    │      ├─ material risk → Sol Architect High
-    │      └─ frozen/routine → contract directly
-    │
-    ├─ Luna Max: narrow bounded implementation
-    ├─ Terra High: already-decided multi-file implementation
-    │
-    ├─ Terra integration + verification
-    │
-    └─ risk-based Sol Reviewer High
-           ├─ high-risk / Sol-designed → mandatory
-           ├─ routine medium → conditional
-           └─ trivial low-risk → skip
+decision_gate = all false
+review_risk.auth_or_permission_touched = true
 ```
 
-## 원칙
+이므로 Sol Architect는 생략하고 구현 후 Sol Reviewer만 호출할 수 있습니다.
 
-- 부모 orchestration은 Terra High가 직접 수행합니다. `terra_orchestrator` child는 사용하지 않습니다.
-- Sol은 저장소 전체를 다시 탐색하거나 일반 코딩을 하지 않습니다.
-- Sol decision gate는 자연어 감각이 아니라 `risk_flags`를 기준으로 강제합니다.
-- Sol에는 단순 요약이 아니라 구조화된 context packet과 필요한 원문 파일/심볼을 제공합니다.
-- Luna는 반드시 `luna_worker`로 명시 호출하며, 좁고 독립 검증 가능한 작업에만 사용합니다.
-- Terra worker는 설계가 이미 확정된 멀티파일 구현과 focused repair에 사용합니다.
-- Sol Max는 자동 승격하지 않습니다.
-- shared workspace writer는 기본 1개입니다. 독립성이 명확할 때만 2개까지 허용합니다.
-- `allowed_files`는 sandbox ACL이 아니므로 작업 전후 diff로 계약 외 변경을 검증합니다.
+### 2. Write boundary 실제 검증
 
-## Mandatory Sol risk flags
+`allowed_files`는 여전히 sandbox ACL은 아닙니다. 대신 v0.3.0부터 작업 전후 파일 내용을 실제로 해시해 범위 이탈을 검출합니다.
 
-다음과 같은 위험이 있으면 Sol decision gate를 통과해야 합니다.
-
-- public contract/API/interface 변경
-- schema/migration/persistence 변경
-- auth/permission/trust boundary
-- concurrency/transaction/idempotency/race/order
-- irreversible/destructive operation
-- new dependency/protocol/framework
-- ambiguous acceptance criteria
-- multiple plausible root causes
-- contract expansion
-- repeated/flaky/non-deterministic failure
-- weak test oracle / test bypass 의심
-- cross-task/release 영향이 있는 generated/shared artifact
-
-제품 선택이나 사용자 승인이 필요한 문제는 Sol이 대신 결정하지 않고 사용자에게 질문합니다.
-
-## Context packet
-
-Sol 호출 시 `references/context-packet.md` 형식을 사용합니다.
-
-핵심 필드:
-
-```yaml
-base_revision:
-original_requirement:
-observed_facts:
-invariants:
-unknowns:
-decisions_already_made:
-relevant_files:
-alternative_designs:
-risk_flags:
-active_task_contracts:
-diff_or_patch:
-verification:
+```bash
+python .codex/slt-tools/contract_guard.py hash-contract --contract <contract.json> --write
+python .codex/slt-tools/contract_guard.py validate-task-contract --contract <contract.json>
+python .codex/slt-tools/contract_guard.py create-task-baseline --contract <contract.json>
+# worker 실행
+python .codex/slt-tools/contract_guard.py verify-write-set --contract <contract.json>
 ```
 
-Terra의 요약만 믿게 하지 않고, 중요한 계약/인터페이스/테스트/변경 파일은 Sol이 직접 확인할 수 있게 합니다.
+허용되지 않은 파일이 바뀌면 `UNDECLARED`, 금지 파일이면 `FORBIDDEN`으로 실패합니다.
+기존 dirty worktree도 파일별 content snapshot을 기준으로 비교합니다.
+
+### 3. Luna High / Max 분리
+
+- `luna_fast`: Luna High — 기계적이고 명확한 bounded 작업
+- `luna_worker`: Luna Max — 좁지만 로직 reasoning이 필요한 작업
+- `terra_worker`: Terra High — 이미 설계가 확정된 복잡/멀티파일 구현
+
+### 4. 설치·업데이트 버전 동기화
+
+Plugin 설치와 별도로 project custom agents가 필요하므로 setup 도구를 추가했습니다.
+
+```bash
+python scripts/slt_setup.py install /path/to/project
+python scripts/slt_setup.py status /path/to/project
+python scripts/slt_setup.py update /path/to/project
+```
+
+대상 프로젝트에는 `.codex/slt-team.json`이 생성되고 policy/agent bundle 버전과 관리 파일 hash가 기록됩니다.
+Skill은 v0.3.0 bundle이 없거나 오래된 경우 named worker를 조용히 실행하지 않도록 설계했습니다.
+
+### 5. Routing eval / CI
+
+라우팅 결과는 의미 분류 이후에는 스크립트로 고정됩니다.
+
+```bash
+python scripts/run_policy_eval.py
+python scripts/run_guard_eval.py
+python scripts/validate_repo.py
+```
+
+GitHub Actions에서도 동일 검증을 실행합니다.
+
+## 중요한 한계
+
+이 시스템을 **완전 결정론적 AI router**라고 부르면 안 됩니다.
+
+Terra가 코드와 요구사항을 보고 다음 boolean을 판단하는 단계는 여전히 의미 판단입니다.
+
+```text
+unresolved_architecture?
+auth code touched?
+weak test oracle?
+```
+
+v0.3.0이 코드로 강제하는 부분은 **그 판단 이후의 routing mapping, contract version/hash, baseline, write-set 검증**입니다.
 
 ## 설치
 
 ```bash
-codex plugin marketplace add naklew/STL_TEAM --ref hybrid-v2
+git clone https://github.com/naklew/STL_TEAM.git
+cd STL_TEAM
+
+codex plugin marketplace add naklew/STL_TEAM --ref main
 codex plugin add sol-luna-team@sol-luna-team
+
+python scripts/slt_setup.py install /path/to/target-project
 ```
 
-대상 프로젝트에 다음도 복사합니다.
+새 Codex 세션은 `gpt-5.6-terra` + `high`로 시작하고 `$sol-luna-team`을 명시 호출하는 것을 권장합니다.
 
-```text
-templates/project/.codex/agents/  →  <target>/.codex/agents/
-templates/project/.codex/config.toml → <target>/.codex/config.toml
-```
+Plugin만 설치하고 agent bundle을 설치하지 않으면 전체 멀티에이전트 시스템이 완성되지 않습니다.
 
-그 후 새 Terra High 세션에서 명시적으로 호출합니다.
+## 운용 원칙
 
-```text
-$sol-luna-team 이 기능을 구현해줘.
-```
-
-## Agent 구성
-
-```text
-sol-architect.toml  → Sol High / read-only
-sol-reviewer.toml   → Sol High / read-only
-luna-worker.toml    → Luna Max / workspace-write
-terra-worker.toml   → Terra High / workspace-write
-```
-
-이름 없는 subagent가 Luna로 떨어지는 것을 방지하기 위해 global/default Luna 모델은 지정하지 않습니다.
-
-## 파일
-
-- `plugins/sol-luna-team/skills/sol-luna-team/SKILL.md`: 전체 routing/orchestration 정책
-- `references/task-contract.md`: bounded task 계약
-- `references/context-packet.md`: Sol 전달용 구조화 evidence packet
-- `templates/project/.codex/config.toml`: 프로젝트별 concurrency 제한
-- `.agents/plugins/marketplace.json`: repo-local marketplace
-- `plugins/sol-luna-team/.codex-plugin/plugin.json`: installable plugin manifest
-
-## 설계 목표
-
-이 시스템은 총 토큰 자체의 최소화보다 다음을 최적화합니다.
-
-```text
-Sol token usage + avoidable rework
-```
-
-Luna/Terra에 맡긴 작업이 반복 실패하거나 새로운 설계 판단이 생기면 저가 모델로 계속 재시도하지 않고 Sol gate로 되돌립니다.
+- Sol Max 자동 사용 금지
+- 공유 workspace writer 기본 1개
+- trivial 작업은 Terra parent가 직접 처리
+- 제품 선택/승인은 Sol이 아니라 사용자에게 질문
+- Sol에는 전체 repo dump 대신 versioned context packet + patch + 필요한 symbol 원문을 제공
+- 총 토큰보다 `Sol token + 재작업`을 최적화

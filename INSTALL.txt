@@ -1,33 +1,64 @@
-SLT Hybrid v2 설치
+SLT Hybrid v0.3.0 설치
+======================
 
-권장 방식: Codex plugin으로 설치
+1) SLT 저장소를 clone 또는 pull합니다.
 
-1) marketplace 추가
-   codex plugin marketplace add naklew/STL_TEAM --ref hybrid-v2
+   git clone https://github.com/naklew/STL_TEAM.git
+   cd STL_TEAM
 
-2) plugin 설치
+2) Codex plugin을 등록/설치합니다.
+
+   codex plugin marketplace add naklew/STL_TEAM --ref main
    codex plugin add sol-luna-team@sol-luna-team
 
-3) 대상 프로젝트에 custom agents와 project-scoped config 복사
-   - templates/project/.codex/agents/ → <target>/.codex/agents/
-   - templates/project/.codex/config.toml → <target>/.codex/config.toml
+3) 대상 프로젝트에 custom agent/tool bundle을 설치합니다.
 
-4) 새 Codex 부모 세션을 다음으로 시작
-   - model: gpt-5.6-terra
-   - reasoning: high
+   python scripts/slt_setup.py install /path/to/target-project
 
-5) 명시적으로 호출
-   $sol-luna-team <작업 요청>
+   이 명령은 다음을 관리합니다.
+   - .codex/agents/luna-fast.toml
+   - .codex/agents/luna-worker.toml
+   - .codex/agents/terra-worker.toml
+   - .codex/agents/sol-architect.toml
+   - .codex/agents/sol-reviewer.toml
+   - .codex/slt-tools/contract_guard.py
+   - .codex/slt-tools/routing_policy.py
+   - .codex/config.toml 의 [agents] enabled/concurrency 설정
+   - .codex/slt-team.json 버전/managed-file hash
 
-핵심 정책
-- parent orchestration은 Terra High가 직접 수행한다.
-- Luna는 반드시 luna_worker 이름으로 좁은 bounded task에만 사용한다.
-- Terra worker는 이미 설계가 확정된 멀티파일 구현/통합에 사용한다.
-- Sol High는 objective risk flag가 활성화된 decision gate와 high-risk final review에만 사용한다.
-- Sol Max는 자동 사용하지 않는다.
-- shared workspace writer는 기본 1개, 정말 독립적인 경우만 2개까지 허용한다.
-- 전역 ~/.codex/config.toml에 Luna를 default_subagent_model로 지정하지 않는다.
+   기존 config.toml의 다른 설정은 보존합니다.
 
-참고
-- plugin 설치/업데이트 후 새 Codex thread를 시작한다.
-- 실제 지원 모델/effort 이름은 사용하는 Codex 클라이언트와 계정에서 확인한다.
+4) 설치 상태를 확인합니다.
+
+   python scripts/slt_setup.py status /path/to/target-project
+
+5) 새 Codex parent 세션을 gpt-5.6-terra / high 로 시작하고 명시적으로 호출합니다.
+
+   $sol-luna-team 이 기능을 구현해줘.
+
+업데이트
+========
+
+SLT 저장소에서:
+
+   git pull
+   python scripts/slt_setup.py update /path/to/target-project
+   python scripts/slt_setup.py status /path/to/target-project
+
+Plugin 업데이트 방식은 사용 중인 Codex client의 plugin 명령을 따릅니다. Skill policy가 v0.3.0인데
+project `.codex/slt-team.json`의 policy/agent bundle 버전이 다르면 worker delegation을 시작하지 않는 것이 안전합니다.
+
+검증
+====
+
+   python scripts/validate_repo.py
+   python scripts/run_policy_eval.py
+   python scripts/run_guard_eval.py
+
+주의
+====
+
+- Plugin 설치만으로 project custom agents가 자동 복사되지는 않습니다. setup 명령을 같이 실행해야 합니다.
+- setup 도구는 `.codex/slt-state/`를 `.git/info/exclude`에 추가해 runtime contract/baseline 파일이 일반 diff에 섞이지 않게 합니다.
+- 공유 workspace writer는 기본 1개로 운용합니다.
+- parent 모델은 skill이 강제로 변경할 수 없으므로 Terra High 세션으로 시작해야 합니다.
