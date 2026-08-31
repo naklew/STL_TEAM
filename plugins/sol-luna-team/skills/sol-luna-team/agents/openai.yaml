@@ -1,7 +1,7 @@
 interface:
-  display_name: "Sol–Luna–Terra Team · Cost Aware"
-  short_description: "Terra leads; Sol decides and reviews; Luna implements bounded tasks."
+  display_name: "SLT Hybrid · Cost Aware"
+  short_description: "Terra leads; objective risk gates call Sol; Luna handles bounded work."
   brand_color: "#7C3AED"
-  default_prompt: "Use $sol-luna-team with Terra as the cost-aware lead. Invoke Sol only for material decisions and final review, and use Luna for bounded implementation."
+  default_prompt: "Use $sol-luna-team with a Terra High parent. Apply objective risk flags before implementation, call Sol High only for mandatory decision/review gates, and use named Luna/Terra workers for execution."
 policy:
-  allow_implicit_invocation: true
+  allow_implicit_invocation: false
