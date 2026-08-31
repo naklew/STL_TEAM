@@ -80,7 +80,7 @@ def main() -> int:
     skill = (ROOT / "plugins/sol-luna-team/skills/sol-luna-team/SKILL.md").read_text(encoding="utf-8")
     if not skill.startswith("---\n") or "name: sol-luna-team" not in skill[:500]:
         fail("SKILL.md frontmatter missing")
-    for marker in ("writer_lock.py", "snapshot_exclude", "security_boundary_touched", "slt_setup.py status"):
+    for marker in ("writer_lock.py", "snapshot_exclude", "security/trust boundary", "slt_setup.py status"):
         if marker not in skill:
             fail(f"SKILL.md missing v0.4 marker: {marker}")
 
