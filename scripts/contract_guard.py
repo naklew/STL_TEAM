@@ -1,9 +1,8 @@
 #!/usr/bin/env python3
 """Deterministic helpers for SLT task contracts and write-boundary verification.
 
-No third-party dependencies are required. Machine-enforced task contracts are JSON.
-The semantic decision of which risk flags are true remains a model/user judgment;
-this tool validates the contract, hashes it canonically, snapshots the worktree,
+The semantic classification of a task remains a model/user judgment. Once a contract exists,
+this tool deterministically validates its shape/version/hash, snapshots the current worktree,
 and verifies the resulting write set.
 """
 
@@ -18,6 +17,9 @@ from pathlib import Path
 import subprocess
 import sys
 from typing import Any
+
+POLICY_VERSION = "0.3.0"
+AGENT_BUNDLE_VERSION = "0.3.0"
 
 DECISION_FLAGS = (
     "unresolved_architecture",
@@ -46,6 +48,8 @@ REVIEW_FLAGS = (
 
 REQUIRED_FIELDS = (
     "id",
+    "policy_version",
+    "agent_bundle_version",
     "base_revision",
     "goal",
     "context",
@@ -104,12 +108,7 @@ def save_json(path: Path, data: Any) -> None:
 
 def canonical_contract(contract: dict[str, Any]) -> bytes:
     material = {k: v for k, v in contract.items() if k != "contract_hash"}
-    return json.dumps(
-        material,
-        sort_keys=True,
-        separators=(",", ":"),
-        ensure_ascii=False,
-    ).encode("utf-8")
+    return json.dumps(material, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
 
 
 def compute_contract_hash(contract: dict[str, Any]) -> str:
@@ -140,6 +139,11 @@ def validate_contract(contract: dict[str, Any], require_hash: bool = True) -> li
         if field not in contract:
             errors.append(f"missing required field: {field}")
 
+    if contract.get("policy_version") != POLICY_VERSION:
+        errors.append(f"policy_version must be {POLICY_VERSION}")
+    if contract.get("agent_bundle_version") != AGENT_BUNDLE_VERSION:
+        errors.append(f"agent_bundle_version must be {AGENT_BUNDLE_VERSION}")
+
     for field in LIST_FIELDS:
         if field in contract and not isinstance(contract[field], list):
             errors.append(f"{field} must be an array")
@@ -150,14 +154,9 @@ def validate_contract(contract: dict[str, Any], require_hash: bool = True) -> li
                 if not isinstance(item, str) or not item.strip():
                     errors.append(f"{field}[{i}] must be a non-empty string")
 
-    if "id" in contract and (not isinstance(contract["id"], str) or not contract["id"].strip()):
-        errors.append("id must be a non-empty string")
-    if "goal" in contract and (not isinstance(contract["goal"], str) or not contract["goal"].strip()):
-        errors.append("goal must be a non-empty string")
-    if "base_revision" in contract and (
-        not isinstance(contract["base_revision"], str) or not contract["base_revision"].strip()
-    ):
-        errors.append("base_revision must be a non-empty string")
+    for field in ("id", "goal", "base_revision"):
+        if field in contract and (not isinstance(contract[field], str) or not contract[field].strip()):
+            errors.append(f"{field} must be a non-empty string")
 
     execution = contract.get("execution")
     if not isinstance(execution, dict):
@@ -194,37 +193,23 @@ def validate_contract(contract: dict[str, Any], require_hash: bool = True) -> li
 
 def git_root(start: Path | None = None) -> Path:
     cwd = str(start or Path.cwd())
-    proc = subprocess.run(
-        ["git", "-C", cwd, "rev-parse", "--show-toplevel"],
-        capture_output=True,
-        text=True,
-    )
+    proc = subprocess.run(["git", "-C", cwd, "rev-parse", "--show-toplevel"], capture_output=True, text=True)
     if proc.returncode != 0:
         raise GuardError("not inside a Git worktree")
     return Path(proc.stdout.strip()).resolve()
 
 
 def git_head(root: Path) -> str:
-    proc = subprocess.run(
-        ["git", "-C", str(root), "rev-parse", "HEAD"],
-        capture_output=True,
-        text=True,
-    )
-    if proc.returncode != 0:
-        return "UNBORN"
-    return proc.stdout.strip()
+    proc = subprocess.run(["git", "-C", str(root), "rev-parse", "HEAD"], capture_output=True, text=True)
+    return proc.stdout.strip() if proc.returncode == 0 else "UNBORN"
 
 
 def worktree_paths(root: Path) -> list[str]:
-    proc = subprocess.run(
-        ["git", "-C", str(root), "ls-files", "-co", "--exclude-standard", "-z"],
-        capture_output=True,
-    )
+    proc = subprocess.run(["git", "-C", str(root), "ls-files", "-co", "--exclude-standard", "-z"], capture_output=True)
     if proc.returncode != 0:
         raise GuardError(proc.stderr.decode("utf-8", errors="replace").strip() or "git ls-files failed")
-    raw = proc.stdout.split(b"\0")
-    paths = []
-    for item in raw:
+    paths: list[str] = []
+    for item in proc.stdout.split(b"\0"):
         if not item:
             continue
         rel = item.decode("utf-8", errors="surrogateescape").replace(os.sep, "/")
@@ -255,8 +240,7 @@ def snapshot(root: Path) -> dict[str, str]:
 
 
 def changed_paths(before: dict[str, str], after: dict[str, str]) -> list[str]:
-    keys = set(before) | set(after)
-    return sorted(path for path in keys if before.get(path) != after.get(path))
+    return sorted(path for path in set(before) | set(after) if before.get(path) != after.get(path))
 
 
 def matches(path: str, patterns: list[str]) -> bool:
@@ -301,11 +285,12 @@ def cmd_baseline(args: argparse.Namespace) -> int:
         for error in errors:
             eprint("ERROR:", error)
         return 2
-
     baseline = {
         "format_version": 1,
         "task_id": contract["id"],
         "contract_hash": contract["contract_hash"],
+        "policy_version": POLICY_VERSION,
+        "agent_bundle_version": AGENT_BUNDLE_VERSION,
         "git_head": git_head(root),
         "snapshot": snapshot(root),
     }
@@ -333,13 +318,13 @@ def cmd_verify(args: argparse.Namespace) -> int:
         raise GuardError("baseline task_id does not match contract")
     if baseline.get("contract_hash") != contract["contract_hash"]:
         raise GuardError("baseline contract_hash does not match current contract")
+    if baseline.get("policy_version") != POLICY_VERSION or baseline.get("agent_bundle_version") != AGENT_BUNDLE_VERSION:
+        raise GuardError("baseline SLT version does not match installed guard")
 
     before = baseline.get("snapshot")
     if not isinstance(before, dict):
         raise GuardError("baseline snapshot is missing or invalid")
-    after = snapshot(root)
-    changed = changed_paths(before, after)
-
+    changed = changed_paths(before, snapshot(root))
     allowed = list(contract.get("allowed_files", []))
     shared = list(contract.get("shared_or_generated_files", []))
     forbidden = list(contract.get("forbidden_files", []))
@@ -374,37 +359,31 @@ def cmd_verify(args: argparse.Namespace) -> int:
         for row in rows:
             print(f"{row['status']:<16} {row['path']}")
         print("PASS" if not violations else "FAIL")
-
     return 0 if not violations else 3
 
 
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description=__doc__)
     sub = p.add_subparsers(dest="command", required=True)
-
-    h = sub.add_parser("hash-contract", help="compute canonical SHA-256 contract hash")
+    h = sub.add_parser("hash-contract")
     h.add_argument("--contract", required=True)
-    h.add_argument("--write", action="store_true", help="write contract_hash back to the JSON file")
+    h.add_argument("--write", action="store_true")
     h.set_defaults(func=cmd_hash)
-
-    v = sub.add_parser("validate-task-contract", help="validate required contract fields and hash")
+    v = sub.add_parser("validate-task-contract")
     v.add_argument("--contract", required=True)
     v.add_argument("--allow-missing-hash", action="store_true")
     v.set_defaults(func=cmd_validate)
-
-    b = sub.add_parser("create-task-baseline", help="snapshot tracked and untracked non-ignored worktree files")
+    b = sub.add_parser("create-task-baseline")
     b.add_argument("--contract", required=True)
     b.add_argument("--repo")
     b.add_argument("--output")
     b.set_defaults(func=cmd_baseline)
-
-    w = sub.add_parser("verify-write-set", help="compare current worktree snapshot with baseline and contract")
+    w = sub.add_parser("verify-write-set")
     w.add_argument("--contract", required=True)
     w.add_argument("--repo")
     w.add_argument("--baseline")
     w.add_argument("--json", action="store_true")
     w.set_defaults(func=cmd_verify)
-
     return p
 
 

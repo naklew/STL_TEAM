@@ -1,9 +1,8 @@
 #!/usr/bin/env python3
 """Deterministic mapping from already-classified SLT flags to model routing.
 
-This script does NOT decide the semantics of the flags. Terra/user evidence determines
-whether a flag is true. Once flags and execution class are provided, this mapping is
-deterministic and testable.
+This tool does not decide whether a semantic flag is true. Terra/user evidence performs that
+classification. Once supplied, the mapping to Sol/Luna/Terra is deterministic and testable.
 """
 
 from __future__ import annotations
@@ -13,6 +12,8 @@ import json
 from pathlib import Path
 import sys
 from typing import Any
+
+POLICY_VERSION = "0.3.0"
 
 DECISION_FLAGS = (
     "unresolved_architecture",
@@ -62,6 +63,8 @@ def validate_flags(name: str, value: Any, keys: tuple[str, ...]) -> None:
 
 
 def route(data: dict[str, Any]) -> dict[str, Any]:
+    if data.get("policy_version") != POLICY_VERSION:
+        raise PolicyError(f"policy_version must be {POLICY_VERSION}")
     decision = data.get("decision_gate")
     review = data.get("review_risk")
     execution = data.get("execution")
@@ -73,7 +76,6 @@ def route(data: dict[str, Any]) -> dict[str, Any]:
     task_class = execution.get("task_class")
     if task_class not in TASK_CLASSES:
         raise PolicyError(f"execution.task_class must be one of: {', '.join(TASK_CLASSES)}")
-
     reasoning = execution.get("bounded_reasoning")
     if task_class == "bounded" and reasoning not in BOUNDED_REASONING:
         raise PolicyError("bounded tasks require execution.bounded_reasoning=mechanical|logic")
@@ -82,7 +84,6 @@ def route(data: dict[str, Any]) -> dict[str, Any]:
 
     architect_required = any(decision.values())
     reviewer_required = any(review.values())
-
     if task_class == "trivial":
         implementation_agent = "parent_terra"
     elif task_class == "bounded":
@@ -91,6 +92,7 @@ def route(data: dict[str, Any]) -> dict[str, Any]:
         implementation_agent = "terra_worker"
 
     return {
+        "policy_version": POLICY_VERSION,
         "architect_required": architect_required,
         "architect_agent": "sol_architect" if architect_required else None,
         "implementation_agent": implementation_agent,
@@ -113,7 +115,7 @@ def load(path: Path) -> dict[str, Any]:
 
 def main() -> int:
     p = argparse.ArgumentParser(description=__doc__)
-    p.add_argument("--input", required=True, help="classification JSON")
+    p.add_argument("--input", required=True)
     p.add_argument("--compact", action="store_true")
     args = p.parse_args()
     try:
@@ -121,10 +123,7 @@ def main() -> int:
     except PolicyError as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
         return 2
-    if args.compact:
-        print(json.dumps(result, sort_keys=True, separators=(",", ":")))
-    else:
-        print(json.dumps(result, indent=2, sort_keys=True))
+    print(json.dumps(result, sort_keys=True, separators=(",", ":")) if args.compact else json.dumps(result, indent=2, sort_keys=True))
     return 0
 
 

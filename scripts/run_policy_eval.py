@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import copy
 import json
 from pathlib import Path
 import sys
@@ -10,7 +11,7 @@ import sys
 SCRIPT_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(SCRIPT_DIR))
 
-from routing_policy import PolicyError, route  # noqa: E402
+from routing_policy import POLICY_VERSION, PolicyError, route  # noqa: E402
 
 
 def main() -> int:
@@ -19,8 +20,10 @@ def main() -> int:
     failures = []
     for case in cases:
         name = case["name"]
+        payload = copy.deepcopy(case["input"])
+        payload["policy_version"] = POLICY_VERSION
         try:
-            actual = route(case["input"])
+            actual = route(payload)
         except PolicyError as exc:
             failures.append((name, f"PolicyError: {exc}"))
             continue
