@@ -14,7 +14,6 @@ import hashlib
 import json
 import os
 from pathlib import Path
-import shutil
 import subprocess
 import sys
 import tempfile
@@ -35,6 +34,7 @@ MANAGED_AGENT_FILES = (
     "sol-reviewer.toml",
 )
 MANAGED_TOOL_FILES = (
+    "policy_defs.py",
     "contract_guard.py",
     "routing_policy.py",
     "writer_lock.py",
@@ -77,7 +77,6 @@ def ensure_sources() -> None:
 
 
 def render_agents_config(text: str) -> str:
-    """Preserve arbitrary TOML text while enforcing SLT's [agents] keys."""
     lines = text.splitlines()
     section_start = None
     section_end = None
@@ -116,22 +115,14 @@ def render_agents_config(text: str) -> str:
 
 
 def git_root(target: Path) -> Path | None:
-    proc = subprocess.run(
-        ["git", "-C", str(target), "rev-parse", "--show-toplevel"],
-        capture_output=True,
-        text=True,
-    )
+    proc = subprocess.run(["git", "-C", str(target), "rev-parse", "--show-toplevel"], capture_output=True, text=True)
     if proc.returncode != 0:
         return None
     return Path(proc.stdout.strip()).resolve()
 
 
 def git_path(root: Path, rel: str) -> Path:
-    proc = subprocess.run(
-        ["git", "-C", str(root), "rev-parse", "--git-path", rel],
-        capture_output=True,
-        text=True,
-    )
+    proc = subprocess.run(["git", "-C", str(root), "rev-parse", "--git-path", rel], capture_output=True, text=True)
     if proc.returncode != 0 or not proc.stdout.strip():
         raise SetupError(f"cannot resolve git path {rel}: {proc.stderr.strip()}")
     path = Path(proc.stdout.strip())
@@ -199,7 +190,6 @@ def restore_paths(snapshot: dict[Path, bytes | None]) -> None:
             else:
                 atomic_write(path, data)
         except OSError:
-            # Best-effort rollback: preserve the original exception from install.
             pass
 
 
@@ -217,11 +207,9 @@ def install_bundle(target: Path, *, update: bool, force: bool, dry_run: bool) ->
     versions = load_versions()
     target = target.resolve()
     target.mkdir(parents=True, exist_ok=True)
-
     existing_manifest = read_manifest(target)
     if update and existing_manifest is None and not force:
         raise SetupError("update requested but .codex/slt-team.json is missing; use install or --force")
-
     managed = expected_managed_files()
     if not update and not force:
         conflicts = [rel for rel in managed if (target / rel).exists()]
@@ -247,10 +235,7 @@ def install_bundle(target: Path, *, update: bool, force: bool, dry_run: bool) ->
             print("MERGE  " + str(exclude_path))
         return 0
 
-    # Stage every package-owned file first so source/read errors cannot leave a partial install.
-    staged: dict[Path, bytes] = {}
-    for rel, src in managed.items():
-        staged[target / rel] = src.read_bytes()
+    staged: dict[Path, bytes] = {target / rel: src.read_bytes() for rel, src in managed.items()}
     staged[target / CONFIG_REL] = new_config.encode("utf-8")
     staged[target / MANIFEST_REL] = manifest_bytes
     if exclude_path and new_exclude is not None:
@@ -263,7 +248,6 @@ def install_bundle(target: Path, *, update: bool, force: bool, dry_run: bool) ->
     except Exception as exc:
         restore_paths(originals)
         raise SetupError(f"install failed and rollback was attempted: {exc}") from exc
-
     print(f"SLT bundle {versions['agent_bundle_version']} installed in {target}")
     return 0
 
@@ -290,31 +274,23 @@ def status(target: Path) -> int:
     if manifest is None:
         print("NOT_INSTALLED")
         return 3
-
     ok = True
     print(f"target: {target}")
     for key in ("plugin_version", "policy_version", "agent_bundle_version"):
-        installed = manifest.get(key)
-        current = versions[key]
+        installed, current = manifest.get(key), versions[key]
         state = "OK" if installed == current else "OUTDATED"
         ok &= state == "OK"
         print(f"{key}: installed={installed} current={current} {state}")
-
     for rel, src in expected_managed_files().items():
         dst = target / rel
         if not dst.exists():
-            print(f"MISSING {rel}")
-            ok = False
+            print(f"MISSING {rel}"); ok = False
         elif sha256_file(dst) != sha256_file(src):
-            print(f"DRIFT   {rel}")
-            ok = False
+            print(f"DRIFT   {rel}"); ok = False
         else:
             print(f"OK      {rel}")
-
     config_ok, config_msg = check_config(target / CONFIG_REL)
-    print(config_msg)
-    ok &= config_ok
-
+    print(config_msg); ok &= config_ok
     root = git_root(target)
     if root is not None:
         try:
@@ -324,9 +300,7 @@ def status(target: Path) -> int:
             print(("OK      " if exclude_ok else "MISSING ") + f"git exclude {exclude}")
             ok &= exclude_ok
         except SetupError as exc:
-            print(f"ERROR   git exclude: {exc}")
-            ok = False
-
+            print(f"ERROR   git exclude: {exc}"); ok = False
     return 0 if ok else 4
 
 
@@ -334,12 +308,8 @@ def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description=__doc__)
     sub = p.add_subparsers(dest="command", required=True)
     for command in ("install", "update"):
-        sp = sub.add_parser(command)
-        sp.add_argument("target")
-        sp.add_argument("--force", action="store_true")
-        sp.add_argument("--dry-run", action="store_true")
-    st = sub.add_parser("status")
-    st.add_argument("target")
+        sp = sub.add_parser(command); sp.add_argument("target"); sp.add_argument("--force", action="store_true"); sp.add_argument("--dry-run", action="store_true")
+    st = sub.add_parser("status"); st.add_argument("target")
     return p
 
 
