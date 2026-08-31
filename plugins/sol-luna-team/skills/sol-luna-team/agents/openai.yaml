@@ -1,7 +1,7 @@
 interface:
-  display_name: "SLT Hybrid v0.3 · Cost Aware"
-  short_description: "Terra leads; task guards constrain workers; Sol handles unresolved decisions and risky review."
+  display_name: "SLT Hybrid v0.4 · Cost Aware"
+  short_description: "Terra leads; worktree-safe guards constrain writers; Sol handles unresolved decisions and material-risk review."
   brand_color: "#7C3AED"
-  default_prompt: "Use $sol-luna-team v0.3.0 with a Terra High parent. Classify decision and review risk separately, use the deterministic routing/task guards, and reserve Sol High for required gates."
+  default_prompt: "Use $sol-luna-team v0.4.0 with a Terra High parent. Verify bundle status, classify decision/review risk separately, use named agents, acquire the worktree writer lock, create a protected baseline, and reserve Sol High for required gates."
 policy:
   allow_implicit_invocation: false
