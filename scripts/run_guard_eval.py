@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Self-test SLT contract hashing, protected baselines, ignored files, and locks."""
+"""Self-test SLT contract hashing, sealed baselines, ignored files, casing, and locks."""
 
 from __future__ import annotations
 
@@ -16,6 +16,7 @@ LOCK = SCRIPT_DIR / "writer_lock.py"
 sys.path.insert(0, str(SCRIPT_DIR))
 
 import contract_guard as cg  # noqa: E402
+import writer_lock as wl  # noqa: E402
 
 
 def run_tool(tool: Path, *args: str, cwd: Path, expect: int = 0) -> subprocess.CompletedProcess[str]:
@@ -56,6 +57,23 @@ def write_contract(path: Path, head: str, *, task_id: str = "EVAL-001") -> dict:
     return contract
 
 
+def baseline_info(contract_path: Path, root: Path) -> tuple[Path, str]:
+    out = run_tool(GUARD, "create-task-baseline", "--contract", str(contract_path), "--json", cwd=root)
+    data = json.loads(out.stdout)
+    return Path(data["baseline"]).resolve(), data["baseline_sha256"]
+
+
+def verify(contract_path: Path, seal: str, root: Path, *, expect: int = 0) -> subprocess.CompletedProcess[str]:
+    return run_tool(
+        GUARD,
+        "verify-write-set",
+        "--contract", str(contract_path),
+        "--baseline-sha", seal,
+        cwd=root,
+        expect=expect,
+    )
+
+
 def main() -> int:
     with tempfile.TemporaryDirectory(prefix="slt-guard-eval-") as td:
         root = Path(td).resolve()
@@ -77,97 +95,102 @@ def main() -> int:
         original = write_contract(contract_path, head)
 
         run_tool(LOCK, "acquire", "--task-id", "EVAL-001", cwd=root)
+        lock_path = wl.lock_path(root)
+        if root != lock_path and root not in lock_path.parents:
+            raise RuntimeError("default writer lock must be workspace-local")
         run_tool(LOCK, "acquire", "--task-id", "OTHER", cwd=root, expect=3)
-        run_tool(GUARD, "validate-task-contract", "--contract", str(contract_path), cwd=root)
-        baseline_result = run_tool(GUARD, "create-task-baseline", "--contract", str(contract_path), cwd=root)
-        baseline_path = Path(baseline_result.stdout.strip()).resolve()
-        expected_baseline = cg.default_baseline_path(root, "EVAL-001").resolve()
-        if baseline_path != expected_baseline:
-            raise RuntimeError(f"baseline path mismatch expected={expected_baseline} actual={baseline_path}")
-        if root == baseline_path or root in baseline_path.parents:
-            raise RuntimeError("protected baseline must live outside the worktree")
-        if not baseline_path.is_file():
-            raise RuntimeError("protected baseline file was not created")
 
-        # Allowed tracked modification passes.
+        run_tool(GUARD, "validate-task-contract", "--contract", str(contract_path), cwd=root)
+        baseline_path, seal = baseline_info(contract_path, root)
+        if root != baseline_path and root not in baseline_path.parents:
+            raise RuntimeError("default baseline must be workspace-local")
+        if not baseline_path.is_file() or seal != cg.sha256_file(baseline_path):
+            raise RuntimeError("baseline/seal creation failed")
+
         (root / "allowed.txt").write_text("changed\n", encoding="utf-8")
-        run_tool(GUARD, "verify-write-set", "--contract", str(contract_path), cwd=root)
+        verify(contract_path, seal, root)
         (root / "allowed.txt").write_text("base\n", encoding="utf-8")
 
-        # Ignored existing file mutation is visible and undeclared.
         (root / "hidden.secret").write_text("mutated\n", encoding="utf-8")
-        out = run_tool(GUARD, "verify-write-set", "--contract", str(contract_path), cwd=root, expect=3)
+        out = verify(contract_path, seal, root, expect=3)
         if "UNDECLARED" not in out.stdout or "hidden.secret" not in out.stdout:
             raise RuntimeError("ignored file mutation was not detected")
         (root / "hidden.secret").write_text("ignored-base\n", encoding="utf-8")
 
-        # Ignored new file is also visible.
         (root / "new.secret").write_text("new\n", encoding="utf-8")
-        out = run_tool(GUARD, "verify-write-set", "--contract", str(contract_path), cwd=root, expect=3)
-        if "new.secret" not in out.stdout:
+        if "new.secret" not in verify(contract_path, seal, root, expect=3).stdout:
             raise RuntimeError("new ignored file was not detected")
         (root / "new.secret").unlink()
 
-        # Undeclared, forbidden, binary, delete, rename and symlink cases.
         (root / "unexpected.txt").write_text("oops\n", encoding="utf-8")
-        if "UNDECLARED" not in run_tool(GUARD, "verify-write-set", "--contract", str(contract_path), cwd=root, expect=3).stdout:
-            raise RuntimeError("unexpected file was not classified as UNDECLARED")
+        if "UNDECLARED" not in verify(contract_path, seal, root, expect=3).stdout:
+            raise RuntimeError("unexpected file was not UNDECLARED")
         (root / "unexpected.txt").unlink()
 
         (root / "forbidden.txt").write_text("oops\n", encoding="utf-8")
-        if "FORBIDDEN" not in run_tool(GUARD, "verify-write-set", "--contract", str(contract_path), cwd=root, expect=3).stdout:
-            raise RuntimeError("forbidden file was not classified as FORBIDDEN")
+        if "FORBIDDEN" not in verify(contract_path, seal, root, expect=3).stdout:
+            raise RuntimeError("forbidden file was not FORBIDDEN")
         (root / "forbidden.txt").write_text("base\n", encoding="utf-8")
 
         (root / "binary.bin").write_bytes(b"\x00\x02changed")
-        if "binary.bin" not in run_tool(GUARD, "verify-write-set", "--contract", str(contract_path), cwd=root, expect=3).stdout:
+        if "binary.bin" not in verify(contract_path, seal, root, expect=3).stdout:
             raise RuntimeError("binary mutation was not detected")
         (root / "binary.bin").write_bytes(b"\x00\x01base")
 
         (root / "allowed.txt").unlink()
-        run_tool(GUARD, "verify-write-set", "--contract", str(contract_path), cwd=root)
+        verify(contract_path, seal, root)
         (root / "allowed.txt").write_text("base\n", encoding="utf-8")
 
         os.rename(root / "allowed.txt", root / "renamed.txt")
-        out = run_tool(GUARD, "verify-write-set", "--contract", str(contract_path), cwd=root, expect=3)
-        if "renamed.txt" not in out.stdout:
+        if "renamed.txt" not in verify(contract_path, seal, root, expect=3).stdout:
             raise RuntimeError("rename target was not detected")
         os.rename(root / "renamed.txt", root / "allowed.txt")
 
-        # Case-only rename is visible on case-sensitive CI filesystems.
-        os.rename(root / "allowed.txt", root / "ALLOWED.txt")
-        out = run_tool(GUARD, "verify-write-set", "--contract", str(contract_path), cwd=root, expect=3)
+        pivot = root / "__slt_case_pivot__.tmp"
+        os.rename(root / "allowed.txt", pivot)
+        os.rename(pivot, root / "ALLOWED.txt")
+        out = verify(contract_path, seal, root, expect=3)
         if "ALLOWED.txt" not in out.stdout:
             raise RuntimeError("case-only rename target was not detected")
-        os.rename(root / "ALLOWED.txt", root / "allowed.txt")
+        os.rename(root / "ALLOWED.txt", pivot)
+        os.rename(pivot, root / "allowed.txt")
 
         if hasattr(os, "symlink"):
             try:
                 os.symlink("allowed.txt", root / "link.txt")
-                out = run_tool(GUARD, "verify-write-set", "--contract", str(contract_path), cwd=root, expect=3)
-                if "link.txt" not in out.stdout:
+            except (OSError, NotImplementedError) as exc:
+                print(f"SKIP symlink eval: {exc}")
+            else:
+                if "link.txt" not in verify(contract_path, seal, root, expect=3).stdout:
                     raise RuntimeError("symlink creation was not detected")
                 (root / "link.txt").unlink()
-            except (OSError, NotImplementedError):
-                pass
+        else:
+            print("SKIP symlink eval: os.symlink unavailable")
 
-        # Contract tampering plus rehash cannot match the protected baseline.
+        baseline_bytes = baseline_path.read_bytes()
+        tampered_baseline = json.loads(baseline_bytes)
+        tampered_baseline["tampered"] = True
+        baseline_path.write_text(json.dumps(tampered_baseline, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        out = verify(contract_path, seal, root, expect=2)
+        if "baseline SHA mismatch" not in out.stderr:
+            raise RuntimeError("baseline tampering was not rejected")
+        baseline_path.write_bytes(baseline_bytes)
+
         tampered = dict(original)
         tampered["goal"] = "tampered"
         tampered["contract_hash"] = cg.compute_contract_hash(tampered)
         contract_path.write_text(json.dumps(tampered, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-        out = run_tool(GUARD, "verify-write-set", "--contract", str(contract_path), cwd=root, expect=2)
+        out = verify(contract_path, seal, root, expect=2)
         if "baseline contract_hash" not in out.stderr:
             raise RuntimeError("contract tampering was not rejected")
         contract_path.write_text(json.dumps(original, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
         run_tool(LOCK, "release", "--task-id", "EVAL-001", cwd=root)
 
-        # Baseline creation refuses a stale base_revision.
         stale_path = state / "STALE.contract.json"
         write_contract(stale_path, "0" * 40, task_id="STALE")
         run_tool(LOCK, "acquire", "--task-id", "STALE", cwd=root)
-        out = run_tool(GUARD, "create-task-baseline", "--contract", str(stale_path), cwd=root, expect=2)
+        out = run_tool(GUARD, "create-task-baseline", "--contract", str(stale_path), "--json", cwd=root, expect=2)
         if "does not match HEAD" not in out.stderr:
             raise RuntimeError("stale base_revision was not rejected")
         run_tool(LOCK, "release", "--task-id", "STALE", cwd=root)
