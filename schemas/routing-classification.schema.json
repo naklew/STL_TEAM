@@ -1,1 +1,36 @@
-{"$schema":"https://json-schema.org/draft/2020-12/schema","$id":"https://github.com/naklew/STL_TEAM/schemas/routing-classification.schema.json","title":"SLT Routing Classification v0.3.0","type":"object","additionalProperties":true,"required":["policy_version","decision_gate","review_risk","execution"],"properties":{"policy_version":{"const":"0.3.0"},"decision_gate":{"type":"object"},"review_risk":{"type":"object"},"execution":{"type":"object"}}}
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/naklew/STL_TEAM/schemas/routing-classification.schema.json",
+  "title": "SLT Routing Classification v0.4.0",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["policy_version", "decision_gate", "review_risk", "execution"],
+  "properties": {
+    "policy_version": {"const": "0.4.0"},
+    "decision_gate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["unresolved_architecture","ambiguous_requirement","competing_root_causes","contract_expansion_required","unresolved_security_policy","security_boundary_unresolved","external_contract_unknown","migration_strategy_unresolved","data_integrity_semantics_unresolved","domain_critical_behavior_unresolved","concurrency_semantics_unresolved","deployment_runtime_safety_unresolved","resource_capacity_semantics_unresolved","irreversible_operation_unresolved","repeated_failure"],
+      "properties": {
+        "unresolved_architecture":{"type":"boolean"},"ambiguous_requirement":{"type":"boolean"},"competing_root_causes":{"type":"boolean"},"contract_expansion_required":{"type":"boolean"},"unresolved_security_policy":{"type":"boolean"},"security_boundary_unresolved":{"type":"boolean"},"external_contract_unknown":{"type":"boolean"},"migration_strategy_unresolved":{"type":"boolean"},"data_integrity_semantics_unresolved":{"type":"boolean"},"domain_critical_behavior_unresolved":{"type":"boolean"},"concurrency_semantics_unresolved":{"type":"boolean"},"deployment_runtime_safety_unresolved":{"type":"boolean"},"resource_capacity_semantics_unresolved":{"type":"boolean"},"irreversible_operation_unresolved":{"type":"boolean"},"repeated_failure":{"type":"boolean"}
+      }
+    },
+    "review_risk": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["public_contract_material_change","schema_or_migration_touched","auth_or_permission_touched","security_boundary_touched","data_integrity_or_loss_risk","domain_critical_logic_touched","concurrency_or_transaction_touched","irreversible_operation_touched","new_dependency_or_protocol_material","deployment_or_runtime_safety_touched","resource_exhaustion_or_capacity_risk","weak_test_oracle","generated_or_shared_artifact_material","repeated_failure_or_flaky"],
+      "properties": {
+        "public_contract_material_change":{"type":"boolean"},"schema_or_migration_touched":{"type":"boolean"},"auth_or_permission_touched":{"type":"boolean"},"security_boundary_touched":{"type":"boolean"},"data_integrity_or_loss_risk":{"type":"boolean"},"domain_critical_logic_touched":{"type":"boolean"},"concurrency_or_transaction_touched":{"type":"boolean"},"irreversible_operation_touched":{"type":"boolean"},"new_dependency_or_protocol_material":{"type":"boolean"},"deployment_or_runtime_safety_touched":{"type":"boolean"},"resource_exhaustion_or_capacity_risk":{"type":"boolean"},"weak_test_oracle":{"type":"boolean"},"generated_or_shared_artifact_material":{"type":"boolean"},"repeated_failure_or_flaky":{"type":"boolean"}
+      }
+    },
+    "execution": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["task_class"],
+      "properties": {
+        "task_class": {"enum": ["trivial", "bounded", "complex_decided"]},
+        "bounded_reasoning": {"enum": ["mechanical", "logic"]}
+      }
+    }
+  }
+}
